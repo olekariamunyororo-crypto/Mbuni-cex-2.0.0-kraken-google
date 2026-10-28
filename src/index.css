@@ -1,0 +1,385 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  /* ═══════════════════════════════════════════════════════════
+     Mbuni CEX — Tempered Glass Design System
+     Dark only · Inter · Lime mascot + Purple CTAs
+     ═══════════════════════════════════════════════════════════ */
+
+  /* Brand & actions */
+  --color-primary: #a3e635;
+  --color-accent: #a3e635;
+  --color-primary-hover: #bef264;
+  --color-primary-soft: rgba(163, 230, 53, 0.14);
+  --color-primary-muted: rgba(163, 230, 53, 0.08);
+  --color-cta: #7f66ff;
+  --color-cta-hover: #9580ff;
+  --color-cta-soft: rgba(127, 102, 255, 0.14);
+  --color-gold: #e0a23a;
+
+  /* Tempered Glass surfaces */
+  --color-bg: #07080c;
+  --color-surface: rgba(20, 22, 31, 0.72);
+  --color-surface-solid: #14161f;
+  --color-elevated: rgba(26, 29, 42, 0.78);
+  --color-elevated-solid: #1a1d2a;
+  --color-elevated-pro: rgba(30, 34, 48, 0.82);
+  --color-glass-highlight: rgba(255, 255, 255, 0.06);
+  --color-glass-border: rgba(255, 255, 255, 0.09);
+
+  /* Text & lines */
+  --color-secondary: #9ca3af;
+  --color-tertiary: #6b7280;
+  --color-muted: #8e8e93;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-divider: rgba(255, 255, 255, 0.06);
+  --color-overlay: rgba(7, 8, 12, 0.68);
+  --color-disabled: rgba(255, 255, 255, 0.25);
+
+  /* Semantic */
+  --color-success: #a3e635;
+  --color-success-soft: rgba(163, 230, 53, 0.12);
+  --color-danger: #ff5c5c;
+  --color-danger-soft: rgba(255, 92, 92, 0.12);
+  --color-warning: #ff9f0a;
+  --color-warning-soft: rgba(255, 159, 10, 0.12);
+  --color-focus: #a3e635;
+
+  /* Neon glows */
+  --color-glow-primary: rgba(163, 230, 53, 0.35);
+  --color-glow-cta: rgba(127, 102, 255, 0.4);
+  --color-glow-danger: rgba(255, 92, 92, 0.3);
+
+  /* Assets */
+  --color-btc: #f7931a;
+  --color-eth: #627eea;
+  --color-usdt: #26a17b;
+  --color-sol: #9945ff;
+  --color-bnb: #f3ba2f;
+  --color-link: #2a5ada;
+  --color-ada: #0033ad;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Component library & legacy aliases */
+  --color-background: var(--color-bg);
+  --color-foreground: #ffffff;
+  --color-card: var(--color-surface);
+  --color-card-foreground: #ffffff;
+  --color-popover: var(--color-elevated);
+  --color-popover-foreground: #ffffff;
+  --color-primary-foreground: #07080c;
+  --color-secondary-foreground: #ffffff;
+  --color-muted-foreground: var(--color-secondary);
+  --color-accent-foreground: #ffffff;
+  --color-destructive: var(--color-danger);
+  --color-border: var(--color-line);
+  --color-input: rgba(255, 255, 255, 0.05);
+  --color-ring: var(--color-focus);
+  --color-up: var(--color-success);
+  --color-down: var(--color-danger);
+
+  --radius: 1.5rem;
+  --radius-sm: calc(var(--radius) - 12px);
+  --radius-md: calc(var(--radius) - 8px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   BASE LAYER
+   ═══════════════════════════════════════════════════════════ */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html, body {
+    background: var(--color-bg);
+    color: #ffffff;
+    font-family: var(--font-sans);
+    font-feature-settings: "tnum" 1, "cv02" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  /* Deep mesh gradient void background */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(ellipse 80% 50% at 20% 0%, rgba(127, 102, 255, 0.08), transparent 50%),
+      radial-gradient(ellipse 60% 40% at 80% 20%, rgba(163, 230, 53, 0.06), transparent 50%),
+      radial-gradient(ellipse 50% 60% at 50% 100%, rgba(99, 69, 255, 0.05), transparent 50%),
+      var(--color-bg);
+  }
+
+  .tnum, .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tnum-tight {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  input:focus-visible {
+    outline: none;
+  }
+
+  button, a, input, [role="button"], [role="tab"] {
+    touch-action: manipulation;
+  }
+
+  /* Custom scrollbars */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TEMPERED GLASS UTILITIES
+   ═══════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* Level 1: Base Glass — standard cards */
+  .glass {
+    background: var(--color-surface);
+    border: 1px solid var(--color-glass-border);
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 var(--color-glass-highlight);
+  }
+
+  /* Level 2: Raised Glass — floating panels, modals, sheets */
+  .glass-raised {
+    background: var(--color-elevated);
+    border: 1px solid var(--color-glass-border);
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 var(--color-glass-highlight);
+  }
+
+  /* Level 3: Pro Glass — order book, dense trade panels */
+  .glass-pro {
+    background: var(--color-elevated-pro);
+    border: 1px solid var(--color-glass-border);
+    backdrop-filter: blur(32px) saturate(1.6);
+    -webkit-backdrop-filter: blur(32px) saturate(1.6);
+    box-shadow:
+      0 16px 48px rgba(0, 0, 0, 0.55),
+      inset 0 1px 0 var(--color-glass-highlight);
+  }
+
+  /* Level 4: Soft Glass — AI cards, low visual weight */
+  .glass-soft {
+    background: rgba(20, 22, 31, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Level 5: Solid Fallback — performance-critical rows */
+  .glass-solid {
+    background: var(--color-surface-solid);
+    border: 1px solid var(--color-line);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Bottom Tab Bar Glass */
+  .tab-bar-glass {
+    background: rgba(7, 8, 12, 0.82);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  /* Stronger glass — more opaque, deeper blur (used by mobile nav) */
+  .glass-strong {
+    background: rgba(20, 22, 31, 0.75);
+    backdrop-filter: blur(30px) saturate(1.8);
+    -webkit-backdrop-filter: blur(30px) saturate(1.8);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  /* Top border highlight — the "tempered glass edge" */
+  .glass-edge {
+    position: relative;
+  }
+  .glass-edge::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+    border-radius: 1px;
+    pointer-events: none;
+  }
+
+  /* Glass chip / badge */
+  .glass-chip {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 9999px;
+  }
+
+  /* Form Input Glass */
+  .glass-input {
+    background: rgba(20, 22, 31, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-glass-border);
+    border-radius: 0.75rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .glass-input:focus-within {
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 3px rgba(163, 230, 53, 0.15);
+  }
+
+  /* Standard card alias */
+  .glass-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-glass-border);
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    border-radius: 1.5rem;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 var(--color-glass-highlight);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .glass-card:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  /* Primary Action Button — purple CTA */
+  .btn-cta {
+    background: linear-gradient(135deg, #7f66ff, #9580ff);
+    color: #ffffff;
+    border-radius: 0.875rem;
+    font-weight: 600;
+    box-shadow:
+      0 4px 20px rgba(127, 102, 255, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transition: transform 0.12s ease-out, box-shadow 0.15s ease;
+  }
+
+  .btn-cta:hover {
+    box-shadow:
+      0 6px 28px rgba(127, 102, 255, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    transform: translateY(-1px);
+  }
+
+  .btn-cta:active {
+    transform: scale(0.98);
+  }
+
+  /* Buy Button — soft lime fill or semantic toggle */
+  .btn-buy {
+    background: linear-gradient(135deg, #a3e635, #84cc16);
+    color: #050608;
+    border-radius: 0.875rem;
+    font-weight: 700;
+    box-shadow:
+      0 4px 20px rgba(163, 230, 53, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transition: all 0.15s ease;
+  }
+
+  .btn-buy:active {
+    transform: scale(0.98);
+  }
+
+  /* Sell Button — semantic red */
+  .btn-sell {
+    background: linear-gradient(135deg, #ff5c5c, #ef4444);
+    color: #ffffff;
+    border-radius: 0.875rem;
+    font-weight: 700;
+    box-shadow:
+      0 4px 20px rgba(255, 92, 92, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    transition: all 0.15s ease;
+  }
+
+  .btn-sell:active {
+    transform: scale(0.98);
+  }
+
+  /* Tempered top edge highlight */
+  .glass-edge {
+    position: relative;
+  }
+
+  .glass-edge::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+    border-radius: 1px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.live-dot { animation: pulse-live 1.6s ease-in-out infinite; }
+
+@keyframes flash-up {
+  0% { background-color: rgba(163, 230, 53, 0.18); }
+  100% { background-color: transparent; }
+}
+@keyframes flash-down {
+  0% { background-color: rgba(255, 92, 92, 0.18); }
+  100% { background-color: transparent; }
+}
+.flash-up { animation: flash-up 0.5s ease-out; }
+.flash-down { animation: flash-down 0.5s ease-out; }
+
+/* Hide scrollbar */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

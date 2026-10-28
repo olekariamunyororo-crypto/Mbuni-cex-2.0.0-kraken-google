@@ -1,0 +1,6 @@
+{
+  "name": "Mbuni CEX 2.0.0",
+  "description": "High-performance spot cryptocurrency exchange featuring a Rust-grade matching engine, professional CLOB trading terminal, instant swap, multi-chain custody wallet, compliance KYC, and microservices architecture.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

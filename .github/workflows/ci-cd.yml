@@ -1,0 +1,412 @@
+# =============================================================================
+# Mbuni CEX — CI/CD pipeline
+#
+# Triggers:
+#   - push to main / master           → run lint + build + push image (latest tag)
+#   - pull request to main / master   → run lint + build (no image push)
+#   - git tag v*.*.*                  → run lint + build + push image (versioned tag) + deploy
+#   - manual dispatch (workflow_dispatch) → choose environment (staging/prod)
+#
+# Required secrets (Settings → Secrets and variables → Actions):
+#   - GHCR_TOKEN            GitHub PAT with write:packages (or use GITHUB_TOKEN)
+#   - VERCEL_TOKEN          (optional) for Vercel deploys
+#   - VERCEL_ORG_ID
+#   - VERCEL_PROJECT_ID
+#   - KUBE_CONFIG_STAGING   base64-encoded kubeconfig for staging cluster
+#   - KUBE_CONFIG_PROD      base64-encoded kubeconfig for prod cluster
+# =============================================================================
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+# Cancel in-progress runs for the same ref — saves CI minutes
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Default permissions — least privilege
+permissions:
+  contents: read
+  packages: write   # needed to push to ghcr.io
+  pull-requests: write # needed to comment on PRs
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Lint + type-check + build (always runs, on every push + PR)
+  # ---------------------------------------------------------------------------
+  build:
+    name: Lint + Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: bun run db:generate
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Unit tests (with coverage)
+        run: bun run test:unit -- --coverage
+        env:
+          CI: "true"
+
+      - name: Upload coverage report
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+      - name: Build
+        run: bun run build
+        env:
+          # Build doesn't need real secrets, but NextAuth requires the env to exist
+          NEXTAUTH_SECRET: ci-build-placeholder-secret-not-used-at-runtime
+          DATABASE_URL: file:./db/ci-build.db
+          NEXTAUTH_URL: http://localhost:3000
+
+      - name: Upload build artifact (for downstream jobs)
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-standalone
+          path: .next/standalone/
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Job 2: E2e tests (Playwright) — runs on PRs + push to main/master
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: E2e Tests (Playwright)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: bun run db:generate
+
+      - name: Apply DB schema (ephemeral SQLite for the test run)
+        run: bun run db:push
+        env:
+          DATABASE_URL: file:./db/ci-e2e.db
+
+      - name: Seed demo users
+        run: bun run db:seed
+        env:
+          DATABASE_URL: file:./db/ci-e2e.db
+
+      - name: Install Playwright browsers
+        run: bunx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: bun run test:e2e
+        env:
+          DATABASE_URL: file:./db/ci-e2e.db
+          NEXTAUTH_SECRET: ci-e2e-test-secret-not-real
+          NEXTAUTH_URL: http://localhost:3000
+          CI: "true"
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Upload Playwright traces (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
+
+      - name: Upload visual regression diffs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-diffs
+          path: tests/e2e/__screenshots__/**/*.png
+          retention-days: 7
+
+      - name: Comment visual regression failure on PR
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `📸 Visual regression tests failed. Download the \`visual-regression-diffs\` artifact to see the diffed screenshots, or run \`just test-e2e-ui\` locally to debug.\n\nIf the change is intentional, update baselines with \`just test-e2e-update\` and commit the new screenshots.`
+            });
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Build + push Docker image (only on push to main/master, or tags)
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Build + Push Image
+    needs: [build, e2e]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # The build doesn't need real secrets — runtime env is injected at deploy
+          build-args: |
+            NODE_ENV=production
+
+      - name: Comment image SHA on PR (if PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = '${{ github.sha }}'.slice(0, 7);
+            const image = '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}'.toLowerCase();
+            github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `🐳 Docker image pushed: \`${image}:sha-${sha}\``
+            });
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Deploy to staging (on every push to main/master)
+  # ---------------------------------------------------------------------------
+  deploy-staging:
+    name: Deploy → Staging (Helm)
+    needs: docker
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: staging
+      url: https://staging.cex.your-domain.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.14.0"
+
+      - name: Deploy
+        run: |
+          helm upgrade --install mbuni-cex infra/k8s/ \
+            --namespace mbuni-cex-staging \
+            --create-namespace \
+            --atomic \
+            --timeout 5m \
+            --set image.repository=${{ env.REGISTRY }}/${{ github.repository }} \
+            --set image.tag=sha-${GITHUB_SHA::7} \
+            --set config.NEXTAUTH_URL=https://staging.cex.your-domain.com \
+            --set ingress.hosts[0].host=staging.cex.your-domain.com \
+            --set ingress.tls[0].hosts[0]=staging.cex.your-domain.com \
+            --set envSecrets.DATABASE_URL="${{ secrets.STAGING_DATABASE_URL }}" \
+            --set envSecrets.NEXTAUTH_SECRET="${{ secrets.STAGING_NEXTAUTH_SECRET }}"
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/mbuni-cex -n mbuni-cex-staging --timeout=300s
+          kubectl get pods -n mbuni-cex-staging -l app.kubernetes.io/name=mbuni-cex
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Deploy to production (on version tags v*.*.*, or manual dispatch)
+  # ---------------------------------------------------------------------------
+  deploy-production:
+    name: Deploy → Production (Helm)
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://cex.your-domain.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.14.0"
+
+      - name: Determine image tag
+        id: tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "image_tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "image_tag=sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy
+        run: |
+          helm upgrade --install mbuni-cex infra/k8s/ \
+            --namespace mbuni-cex \
+            --create-namespace \
+            --atomic \
+            --timeout 10m \
+            -f infra/k8s/values-prod.yaml \
+            --set image.repository=${{ env.REGISTRY }}/${{ github.repository }} \
+            --set image.tag=${{ steps.tag.outputs.image_tag }} \
+            --set config.NEXTAUTH_URL=https://cex.your-domain.com \
+            --set ingress.hosts[0].host=cex.your-domain.com \
+            --set ingress.tls[0].hosts[0]=cex.your-domain.com \
+            --set envSecrets.DATABASE_URL="${{ secrets.PROD_DATABASE_URL }}" \
+            --set envSecrets.NEXTAUTH_SECRET="${{ secrets.PROD_NEXTAUTH_SECRET }}"
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/mbuni-cex -n mbuni-cex --timeout=600s
+          kubectl get pods -n mbuni-cex -l app.kubernetes.io/name=mbuni-cex
+
+      - name: Create GitHub release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') }}
+
+  # ---------------------------------------------------------------------------
+  # Job 5 (optional): Vercel deploy instead of Helm — comment out if not using
+  # ---------------------------------------------------------------------------
+  # vercel-deploy:
+  #   name: Deploy → Vercel
+  #   needs: build
+  #   if: github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Setup Bun
+  #       uses: oven-sh/setup-bun@v2
+  #     - name: Install Vercel CLI
+  #       run: bun add -g vercel
+  #     - name: Pull Vercel env
+  #       run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
+  #       env:
+  #         VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  #         VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  #     - name: Build
+  #       run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+  #       env:
+  #         VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  #         VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  #     - name: Deploy
+  #       run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+  #       env:
+  #         VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  #         VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

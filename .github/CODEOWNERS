@@ -1,0 +1,127 @@
+# =============================================================================
+# Mbuni CEX — CODEOWNERS
+#
+# Code owners are automatically requested as reviewers when a PR modifies
+# files in their owned paths. GitHub uses this file to assign reviewers
+# based on the changed files.
+#
+# Format: <path pattern> <owner(s)>
+# Owners can be GitHub usernames (@alice) or team names (@your-org/frontend).
+# Multiple owners can be listed per line, separated by spaces.
+#
+# Order matters: later matching rules override earlier ones. The LAST matching
+# pattern wins for a given file.
+#
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# =============================================================================
+
+# ----- Default: request the core team on everything -----
+# Every PR gets at least one reviewer from the core team.
+*                                           @your-org/core-maintainers
+
+# ----- Application code (the matching engine + store) -----
+# The matching engine is the heart of the exchange — needs careful review.
+/src/lib/opencex/engine.ts                 @your-org/engine-team @your-org/core-maintainers
+/src/lib/opencex/engine.test.ts            @your-org/engine-team @your-org/core-maintainers
+/src/lib/opencex/engine.property.test.ts   @your-org/engine-team @your-org/core-maintainers
+/src/lib/opencex/store.ts                  @your-org/engine-team @your-org/core-maintainers
+/src/lib/opencex/types.ts                  @your-org/engine-team @your-org/core-maintainers
+/src/lib/opencex/seed.ts                   @your-org/engine-team @your-org/core-maintainers
+/src/lib/opencex/format.ts                 @your-org/engine-team @your-org/core-maintainers
+
+# ----- Auth + sessions -----
+# Security-sensitive — needs review from the security team in addition to core.
+/src/lib/auth/                             @your-org/security-team @your-org/core-maintainers
+/src/app/api/auth/                         @your-org/security-team @your-org/core-maintainers
+/src/app/api/signup/                       @your-org/security-team @your-org/core-maintainers
+/src/app/api/session/                      @your-org/security-team @your-org/core-maintainers
+/src/app/api/onboarding/                   @your-org/security-team @your-org/core-maintainers
+/src/components/opencex/auth/              @your-org/security-team @your-org/frontend-team
+/prisma/schema.prisma                      @your-org/security-team @your-org/db-team
+
+# ----- Frontend views -----
+/src/components/opencex/views/trading.tsx  @your-org/frontend-team
+/src/components/opencex/views/markets.tsx  @your-org/frontend-team
+/src/components/opencex/views/swap.tsx     @your-org/frontend-team
+/src/components/opencex/views/wallet.tsx   @your-org/frontend-team
+/src/components/opencex/views/admin.tsx    @your-org/frontend-team @your-org/security-team
+/src/components/opencex/views/architecture.tsx @your-org/frontend-team
+/src/components/opencex/                   @your-org/frontend-team
+
+# ----- UI primitives (shadcn/ui vendored components) -----
+# These are vendored — only request review if someone actually edits them
+# (which should be rare).
+/src/components/ui/                        @your-org/frontend-team
+
+# ----- Database + migrations -----
+/prisma/                                   @your-org/db-team @your-org/core-maintainers
+/prisma/schema.prisma                      @your-org/db-team @your-org/security-team
+/prisma/seed.ts                            @your-org/db-team
+/prisma/migrations/                        @your-org/db-team @your-org/core-maintainers
+/scripts/check-db.ts                       @your-org/db-team
+
+# ----- Infrastructure -----
+/Dockerfile                                @your-org/infra-team @your-org/security-team
+/.dockerignore                             @your-org/infra-team
+/docker-compose.yml                        @your-org/infra-team
+/infra/                                    @your-org/infra-team
+/infra/k8s/                                @your-org/infra-team @your-org/security-team
+/infra/caddy/                              @your-org/infra-team @your-org/security-team
+
+# ----- CI/CD + GitHub config -----
+/.github/                                  @your-org/infra-team @your-org/core-maintainers
+/.github/workflows/                        @your-org/infra-team @your-org/security-team
+/.github/ISSUE_TEMPLATE/                   @your-org/core-maintainers
+/.github/PULL_REQUEST_TEMPLATE.md          @your-org/core-maintainers
+/.github/dependabot.yml                    @your-org/infra-team
+/renovate.json                             @your-org/infra-team
+
+# ----- Documentation -----
+/README.md                                 @your-org/core-maintainers @your-org/docs-team
+/CONTRIBUTING.md                           @your-org/core-maintainers @your-org/docs-team
+/CHANGELOG.md                              @your-org/core-maintainers @your-org/release-team
+/SECURITY.md                               @your-org/security-team @your-org/core-maintainers
+/LICENSE                                   @your-org/core-maintainers
+/docs/                                     @your-org/docs-team
+
+# ----- Build config + tooling -----
+/Makefile                                  @your-org/infra-team @your-org/core-maintainers
+/justfile                                  @your-org/infra-team @your-org/core-maintainers
+/package.json                              @your-org/core-maintainers
+/bun.lock                                  @your-org/core-maintainers
+/next.config.ts                            @your-org/core-maintainers
+/tsconfig.json                             @your-org/core-maintainers
+/eslint.config.mjs                         @your-org/core-maintainers
+/tailwind.config.ts                        @your-org/frontend-team
+/postcss.config.mjs                        @your-org/frontend-team
+/vitest.config.ts                          @your-org/engine-team
+/playwright.config.ts                      @your-org/frontend-team
+/.storybook/                               @your-org/frontend-team
+
+# ----- Tests (engine team owns engine tests, frontend owns e2e) -----
+/src/lib/opencex/*.test.ts                 @your-org/engine-team
+/src/lib/opencex/*.property.test.ts        @your-org/engine-team
+/tests/                                    @your-org/frontend-team @your-org/qa-team
+
+# ----- Static assets -----
+/public/                                   @your-org/frontend-team
+/public/ostrich.svg                        @your-org/core-maintainers
+
+# ----- Environment (templates only — real .env is gitignored) -----
+/.env.example                              @your-org/security-team @your-org/infra-team
+
+# =============================================================================
+# Team definitions — create these teams in your GitHub org settings:
+#   @your-org/core-maintainers   — lead engineers, can approve any PR
+#   @your-org/engine-team        — matching engine specialists
+#   @your-org/frontend-team      — React/UI specialists
+#   @your-org/security-team      — security reviewers (auth, secrets, infra)
+#   @your-org/infra-team         — DevOps + Kubernetes + CI/CD
+#   @your-org/db-team            — database + migrations
+#   @your-org/docs-team          — documentation maintainers
+#   @your-org/release-team       — release managers (changelog, versioning)
+#   @your-org/qa-team            — QA engineers (e2e tests, visual regression)
+#
+# Until these teams exist, replace @your-org/<team> with individual GitHub
+# usernames (e.g. @alice @bob).
+# =============================================================================

@@ -1,0 +1,141 @@
+# =============================================================================
+# Mbuni CEX — Helm chart values
+#
+# Override these with -f values.yaml, --set, or a per-env overlay file.
+# =============================================================================
+
+# ----- Image -----
+image:
+  repository: ghcr.io/your-org/mbuni-cex
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+  # If using a private registry, specify a Secret name here:
+  pullSecrets: []
+
+# ----- Replicas + autoscaling -----
+replicaCount: 2
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  # targetMemoryUtilizationPercentage: 80
+
+# ----- Pod resources -----
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# ----- Service -----
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+# ----- Ingress -----
+ingress:
+  enabled: true
+  className: "nginx"   # or "traefik", "alb", etc.
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  hosts:
+    - host: cex.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mbuni-cex-tls
+      hosts:
+        - cex.example.com
+
+# ----- Environment (NON-secret) -----
+# These are baked into a ConfigMap and mounted as env vars.
+config:
+  NEXTAUTH_URL: "https://cex.example.com"
+  NODE_ENV: "production"
+  # DATABASE_URL is a SECRET — see envSecrets below.
+  # If you prefer to use an externally-managed secret (e.g. from Vault /
+  # ExternalSecrets), leave these empty and set secretExistingSecretName instead.
+  # NEXTAUTH_SECRET is also a SECRET — see envSecrets.
+
+# ----- Secrets -----
+# Option A: provide raw values here (Helm will create a Secret for you).
+# ⚠️ Don't commit real secrets to git — use --set or a sealed-secret overlay.
+envSecrets:
+  DATABASE_URL: ""                                    # e.g. postgresql://user:pass@host:5432/mbuni_cex
+  NEXTAUTH_SECRET: ""                                 # e.g. output of `openssl rand -base64 32`
+
+# Option B: reference an existing Secret (created out-of-band via Vault,
+# ExternalSecrets, SealedSecrets, etc.) — leave envSecrets empty if using this.
+secretExistingSecretName: ""
+
+# ----- Probes -----
+probes:
+  liveness:
+    enabled: true
+    path: /api/session
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    path: /api/session
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# ----- Pod-level concerns -----
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false   # Next.js writes to .next/cache; set true if you mount a tmpfs there
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# ----- Pod disruption budget (keeps min replicas available during node drains) -----
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ----- Service account -----
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ----- Database migration job -----
+# Runs `prisma db push` (or `prisma migrate deploy`) once before the app starts.
+# Set to false if you run migrations out-of-band (recommended for prod).
+migration:
+  enabled: true
+  command: ["bun", "run", "db:push"]
+  # For proper versioned migrations use:
+  # command: ["bun", "run", "db:migrate:deploy"]
+  # And add this script to package.json:
+  # "db:migrate:deploy": "prisma migrate deploy"
+
+# ----- Network policy (lock down egress to only the DB) -----
+networkPolicy:
+  enabled: false
+  # If enabled, specify the DB CIDR for egress:
+  # dbEgressCidr: 10.0.0.0/24

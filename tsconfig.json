@@ -1,0 +1,58 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "module": "ESNext",
+    "types": ["vite/client"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "next-auth/react": [
+        "./src/lib/auth/next-auth-shim.tsx"
+      ],
+      "next-auth": [
+        "./src/lib/auth/next-auth-shim.tsx"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "exclude": [
+    "dist",
+    "prisma",
+    "engine",
+    "services",
+    "infra",
+    "scripts",
+    "tests",
+    ".storybook",
+    "**/*.test.*",
+    "**/*.stories.*",
+    "*.config.ts",
+    "src/app/api",
+    "src/app/layout.tsx",
+    "src/app/page.tsx",
+    "src/lib/db.ts",
+    "src/lib/auth/config.ts",
+    "src/hooks/use-toast.ts",
+    "src/components/ui/calendar.tsx",
+    "src/components/ui/chart.tsx",
+    "src/components/ui/form.tsx",
+    "src/components/ui/resizable.tsx",
+    "src/components/ui/toast.tsx",
+    "src/components/ui/toaster.tsx"
+  ]
+}

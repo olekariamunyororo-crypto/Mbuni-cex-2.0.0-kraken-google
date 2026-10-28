@@ -1,0 +1,175 @@
+# Mbuni CEX 2.0 — Full microservices stack
+#
+# Services:
+#   engine      — Rust matching engine (gRPC :50051)
+#   trading     — Go trading service  (HTTP :8080)
+#   wallet      — Go wallet service   (HTTP :8081)
+#   marketdata  — Go market data      (HTTP :8082)
+#   compliance  — Go compliance        (HTTP :8083)
+#   db          — PostgreSQL 17
+#   nats        — NATS JetStream
+#   dragonfly   — Dragonfly (Redis-compatible cache)
+#   caddy       — Reverse proxy + auto-TLS
+#
+# Usage:
+#   docker compose -f docker-compose-2.0.yml up -d --build
+
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: engine/Dockerfile
+    container_name: mbuni-engine
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+    environment:
+      RUST_LOG: info
+    networks:
+      - mbuni-net
+
+  trading:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE_NAME: trading
+    container_name: mbuni-trading
+    restart: unless-stopped
+    depends_on:
+      - engine
+      - db
+      - nats
+    environment:
+      PORT: "8080"
+      ENGINE_ADDR: "engine:50051"
+      DATABASE_URL: "postgresql://mbuni:${POSTGRES_PASSWORD:-devpassword}@db:5432/mbuni_cex?sslmode=disable"
+      NATS_URL: "nats://nats:4222"
+      REDIS_URL: "redis://dragonfly:6379"
+    ports:
+      - "8080:8080"
+    networks:
+      - mbuni-net
+
+  wallet:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE_NAME: wallet
+    container_name: mbuni-wallet
+    restart: unless-stopped
+    depends_on: [db, nats]
+    environment:
+      PORT: "8081"
+      DATABASE_URL: "postgresql://mbuni:${POSTGRES_PASSWORD:-devpassword}@db:5432/mbuni_cex?sslmode=disable"
+      NATS_URL: "nats://nats:4222"
+    ports:
+      - "8081:8081"
+    networks:
+      - mbuni-net
+
+  marketdata:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE_NAME: marketdata
+    container_name: mbuni-marketdata
+    restart: unless-stopped
+    depends_on: [engine, dragonfly]
+    environment:
+      PORT: "8082"
+      ENGINE_ADDR: "engine:50051"
+      REDIS_URL: "redis://dragonfly:6379"
+    ports:
+      - "8082:8082"
+    networks:
+      - mbuni-net
+
+  compliance:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE_NAME: compliance
+    container_name: mbuni-compliance
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      PORT: "8083"
+      DATABASE_URL: "postgresql://mbuni:${POSTGRES_PASSWORD:-devpassword}@db:5432/mbuni_cex?sslmode=disable"
+    ports:
+      - "8083:8083"
+    networks:
+      - mbuni-net
+
+  db:
+    image: postgres:17-alpine
+    container_name: mbuni-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mbuni
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: mbuni_cex
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mbuni"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - mbuni-net
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: mbuni-nats
+    restart: unless-stopped
+    command: ["--jetstream", "--store_dir", "/data"]
+    volumes:
+      - natsdata:/data
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # monitoring
+    networks:
+      - mbuni-net
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    container_name: mbuni-dragonfly
+    restart: unless-stopped
+    volumes:
+      - dragonflydata:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - mbuni-net
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: mbuni-caddy
+    restart: unless-stopped
+    depends_on: [trading, wallet, marketdata, compliance]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    networks:
+      - mbuni-net
+
+volumes:
+  pgdata:
+  natsdata:
+  dragonflydata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  mbuni-net:
+    driver: bridge

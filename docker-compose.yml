@@ -1,0 +1,113 @@
+# =============================================================================
+# Mbuni CEX — Docker Compose (production-ready local stack)
+#
+# Brings up:
+#   - PostgreSQL 17 (with health check + persistent volume)
+#   - Mbuni CEX app (Next.js standalone server)
+#   - Caddy reverse proxy (auto-TLS via Let's Encrypt in prod, plain HTTP in dev)
+#
+# Usage:
+#   1. Create a .env file in the project root with:
+#        NEXTAUTH_SECRET=<openssl rand -base64 32>
+#        NEXTAUTH_URL=http://localhost:8080   # or your prod domain
+#        POSTGRES_USER=mbuni
+#        POSTGRES_PASSWORD=<strong-password>
+#        POSTGRES_DB=mbuni_cex
+#        DOMAIN=localhost                      # set to your real domain for prod TLS
+#
+#   2. Build + start:
+#        docker compose up -d --build
+#
+#   3. Apply the DB schema (one-time):
+#        docker compose exec app bun run db:push
+#
+#   4. Tail logs:
+#        docker compose logs -f app
+#
+#   5. Stop:
+#        docker compose down
+#      (add -v to wipe the DB volume — DESTRUCTIVE)
+# =============================================================================
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: mbuni-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mbuni}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-mbuni_cex}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mbuni} -d ${POSTGRES_DB:-mbuni_cex}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # Don't expose the DB publicly in production — only the app container needs it.
+    # For local debugging you can uncomment:
+    # ports:
+    #   - "5432:5432"
+    networks:
+      - mbuni-net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mbuni-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-mbuni}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-mbuni_cex}?schema=public"
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?NEXTAUTH_URL is required}
+      NODE_ENV: production
+    # Expose to Caddy on the internal network; also expose 3000 directly for
+    # local dev where you might not want Caddy in front.
+    ports:
+      - "3000:3000"
+    networks:
+      - mbuni-net
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"fetch('http://localhost:3000/api/session').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: mbuni-caddy
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      APP_HOST: app:3000
+    networks:
+      - mbuni-net
+
+volumes:
+  pgdata:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+
+networks:
+  mbuni-net:
+    driver: bridge

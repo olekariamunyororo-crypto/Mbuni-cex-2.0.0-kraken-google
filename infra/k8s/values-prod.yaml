@@ -1,0 +1,85 @@
+# =============================================================================
+# Mbuni CEX — production values overlay for the Helm chart
+#
+# Usage:
+#   helm install mbuni-cex infra/k8s/ \
+#     -f infra/k8s/values.yaml \
+#     -f infra/k8s/values-prod.yaml \
+#     --set envSecrets.DATABASE_URL="postgresql://..." \
+#     --set envSecrets.NEXTAUTH_SECRET="$(openssl rand -base64 32)"
+#
+# Or with a separate secrets overlay (kept out of git):
+#   helm install mbuni-cex infra/k8s/ \
+#     -f infra/k8s/values.yaml \
+#     -f infra/k8s/values-prod.yaml \
+#     -f /path/to/secrets.yaml
+# =============================================================================
+
+# Production-grade replica count
+replicaCount: 3
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 65
+  targetMemoryUtilizationPercentage: 75
+
+# Tighter resources for production
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+
+# Real production domain
+config:
+  NEXTAUTH_URL: "https://cex.your-domain.com"
+  NODE_ENV: "production"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+  hosts:
+    - host: cex.your-domain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mbuni-cex-tls
+      hosts:
+        - cex.your-domain.com
+
+# Spread pods across AZs
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: mbuni-cex
+
+# Enable network policy
+networkPolicy:
+  enabled: true
+  # Set this to the CIDR of your managed Postgres
+  dbEgressCidr: "10.0.0.0/24"
+
+# Use proper migrations in prod (not db:push)
+migration:
+  enabled: true
+  command: ["bun", "run", "db:migrate:deploy"]
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

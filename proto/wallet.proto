@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package mbuni.v1;
+
+service WalletService {
+  rpc GetDepositAddress(GetDepositAddressRequest) returns (DepositAddressResponse);
+  rpc RequestWithdrawal(WithdrawalRequest) returns (WithdrawalResponse);
+  rpc GetDeposits(GetTransactionsRequest) returns (DepositsResponse);
+  rpc GetWithdrawals(GetTransactionsRequest) returns (WithdrawalsResponse);
+  rpc AddWhitelistAddress(WhitelistRequest) returns (WhitelistResponse);
+  rpc GetWhitelist(GetWhitelistRequest) returns (WhitelistResponse);
+}
+
+message GetDepositAddressRequest {
+  string user_id = 1;
+  string asset = 2;
+  string chain = 3;
+}
+
+message DepositAddressResponse {
+  string address = 1;
+  string chain = 2;
+  string memo = 3;
+}
+
+message WithdrawalRequest {
+  string user_id = 1;
+  string asset = 2;
+  string chain = 3;
+  double amount = 4;
+  string address = 5;
+}
+
+message WithdrawalResponse {
+  string withdrawal_id = 1;
+  string status = 2;
+  double fee = 3;
+}
+
+message GetTransactionsRequest {
+  string user_id = 1;
+  optional string asset = 2;
+  uint32 limit = 3;
+  uint32 offset = 4;
+}
+
+message Deposit {
+  string id = 1;
+  string asset = 2;
+  string chain = 3;
+  double amount = 4;
+  string tx_hash = 5;
+  string address = 6;
+  uint32 confirmations = 7;
+  uint32 required_confirmations = 8;
+  string status = 9;
+  int64 timestamp = 10;
+}
+
+message Withdrawal {
+  string id = 1;
+  string asset = 2;
+  string chain = 3;
+  double amount = 4;
+  double fee = 5;
+  string address = 6;
+  string tx_hash = 7;
+  string status = 8;
+  int64 timestamp = 9;
+}
+
+message DepositsResponse {
+  repeated Deposit deposits = 1;
+  uint32 total = 2;
+}
+
+message WithdrawalsResponse {
+  repeated Withdrawal withdrawals = 1;
+  uint32 total = 2;
+}
+
+message WhitelistRequest {
+  string user_id = 1;
+  string asset = 2;
+  string chain = 3;
+  string address = 4;
+  string label = 5;
+}
+
+message WhitelistResponse {
+  repeated WhitelistedAddress addresses = 1;
+  bool ok = 2;
+}
+
+message GetWhitelistRequest {
+  string user_id = 1;
+}
+
+message WhitelistedAddress {
+  string id = 1;
+  string asset = 2;
+  string chain = 3;
+  string address = 4;
+  string label = 5;
+  uint32 time_lock_hours = 6;
+  int64 added_at = 7;
+}
