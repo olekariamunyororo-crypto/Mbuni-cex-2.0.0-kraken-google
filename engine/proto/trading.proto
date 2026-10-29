@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package mbuni.v1;
+
+// Trading Service — gRPC + REST service exposed by Go
+// Consumed by: API Gateway / Frontend
+
+service TradingService {
+  rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
+  rpc GetOpenOrders(GetOrdersRequest) returns (GetOrdersResponse);
+  rpc GetOrderHistory(GetOrdersRequest) returns (GetOrdersResponse);
+  rpc GetBalances(GetBalancesRequest) returns (GetBalancesResponse);
+}
+
+// Re-import shared types
+import "matching_engine.proto";
+
+message GetOrdersRequest {
+  string user_id = 1;
+  optional string pair = 2;
+  uint32 limit = 3;
+  uint32 offset = 4;
+}
+
+message GetOrdersResponse {
+  repeated Order orders = 1;
+  uint32 total = 2;
+}
+
+message GetBalancesRequest {
+  string user_id = 1;
+}
+
+message Balance {
+  string asset = 1;
+  double free = 2;
+  double locked = 3;
+  double usd_value = 4;
+}
+
+message GetBalancesResponse {
+  repeated Balance balances = 1;
+}

@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package mbuni.v1;
+
+service MarketDataService {
+  rpc GetTicker(GetTickerRequest) returns (TickerResponse);
+  rpc GetKlines(GetKlinesRequest) returns (KlinesResponse);
+  rpc StreamTrades(StreamRequest) returns (stream Trade);
+  rpc StreamOrderBook(StreamRequest) returns (stream OrderBookSnapshot);
+}
+
+import "matching_engine.proto";
+
+message GetTickerRequest {
+  string pair = 1;
+}
+
+message TickerResponse {
+  string pair = 1;
+  double last_price = 2;
+  double price_change = 3;
+  double price_change_pct = 4;
+  double high_24h = 5;
+  double low_24h = 6;
+  double volume_24h = 7;
+  double quote_volume_24h = 8;
+}
+
+message GetKlinesRequest {
+  string pair = 1;
+  string interval = 2;  // "1m", "5m", "15m", "1h", "4h"
+  uint32 limit = 3;
+}
+
+message Kline {
+  int64 open_time = 1;
+  double open = 2;
+  double high = 3;
+  double low = 4;
+  double close = 5;
+  double volume = 6;
+}
+
+message KlinesResponse {
+  repeated Kline klines = 1;
+}

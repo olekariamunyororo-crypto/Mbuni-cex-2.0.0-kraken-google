@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package mbuni.v1;
+
+// Matching Engine — gRPC service exposed by the Rust engine
+// Consumed by: Trading Service (Go)
+
+service MatchingEngine {
+  // Place a new order. Returns the order result + any trades produced.
+  rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
+  
+  // Cancel an existing order by ID.
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
+  
+  // Get a snapshot of the current order book for a pair.
+  rpc GetSnapshot(SnapshotRequest) returns (OrderBookSnapshot);
+  
+  // Subscribe to a stream of order book updates for a pair.
+  rpc StreamBookUpdates(StreamRequest) returns (stream BookUpdate);
+  
+  // Subscribe to a stream of trades for a pair.
+  rpc StreamTrades(StreamRequest) returns (stream Trade);
+  
+  // Health check
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// --- Enums ---
+
+enum Side {
+  SIDE_UNSPECIFIED = 0;
+  BUY = 1;
+  SELL = 2;
+}
+
+enum OrderType {
+  ORDER_TYPE_UNSPECIFIED = 0;
+  LIMIT = 1;
+  MARKET = 2;
+  IOC = 3;      // Immediate-or-Cancel
+  FOK = 4;      // Fill-or-Kill
+  POST_ONLY = 5;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  NEW = 1;
+  PARTIALLY_FILLED = 2;
+  FILLED = 3;
+  CANCELLED = 4;
+  REJECTED = 5;
+}
+
+// --- Request / Response messages ---
+
+message PlaceOrderRequest {
+  string pair = 1;          // e.g. "BTC/USDT"
+  Side side = 2;
+  OrderType order_type = 3;
+  optional double price = 4; // null for MARKET orders
+  double qty = 5;
+  string user_id = 6;
+  string client_order_id = 7; // idempotency key
+}
+
+message PlaceOrderResponse {
+  Order order = 1;
+  repeated Trade trades = 2;
+  bool ok = 3;
+  string reject_reason = 4;
+}
+
+message CancelOrderRequest {
+  string order_id = 1;
+  string pair = 2;
+}
+
+message CancelOrderResponse {
+  bool ok = 1;
+}
+
+message SnapshotRequest {
+  string pair = 1;
+  uint32 depth = 2; // number of levels per side (default 20)
+}
+
+message OrderBookSnapshot {
+  string pair = 1;
+  repeated BookLevel bids = 2;  // sorted descending
+  repeated BookLevel asks = 3;  // sorted ascending
+  double spread = 4;
+  double mid_price = 5;
+  double last_price = 6;
+  int64 timestamp = 7;
+}
+
+message BookLevel {
+  double price = 1;
+  double qty = 2;
+  double total = 3;       // cumulative
+  uint32 order_count = 4;
+}
+
+message StreamRequest {
+  string pair = 1;
+}
+
+message BookUpdate {
+  string pair = 1;
+  repeated BookLevel bids = 2;
+  repeated BookLevel asks = 3;
+  double last_price = 4;
+  int64 timestamp = 5;
+}
+
+message Trade {
+  string id = 1;
+  string pair = 2;
+  double price = 3;
+  double qty = 4;
+  Side side = 5;            // aggressor side
+  string buyer_order_id = 6;
+  string seller_order_id = 7;
+  int64 timestamp = 8;
+}
+
+message Order {
+  string id = 1;
+  string pair = 2;
+  Side side = 3;
+  OrderType order_type = 4;
+  optional double price = 5;
+  double qty = 6;
+  double filled_qty = 7;
+  double remaining_qty = 8;
+  OrderStatus status = 9;
+  string user_id = 10;
+  int64 timestamp = 11;
+  optional double avg_fill_price = 12;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool ready = 1;
+  string version = 2;
+  uint64 uptime_seconds = 3;
+  uint64 orders_processed = 4;
+}
