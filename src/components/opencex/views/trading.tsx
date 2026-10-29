@@ -42,7 +42,7 @@ export function TradingView() {
         <div className="flex items-center gap-3">
           <PairSelector />
           {ticker && (
-            <div className="hidden lg:flex items-center gap-5 text-xs">
+            <div className="hidden lg:flex items-center gap-3.5 xl:gap-5 text-xs overflow-x-auto no-scrollbar shrink-0">
               <Stat label="Last Price" value={`$${fmtPrice(ticker.lastPrice, 2)}`} />
               <Stat
                 label="24h Change"
@@ -265,9 +265,9 @@ function Stat({
   const color =
     tone === "up" ? "text-primary" : tone === "down" ? "text-danger" : "text-white";
   return (
-    <div className={`flex ${compact ? "flex-row items-baseline gap-1.5" : "flex-col"} leading-tight shrink-0`}>
-      <span className="text-[10px] text-tertiary uppercase tracking-wider font-medium">{label}</span>
-      <span className={`text-xs font-semibold tnum ${color}`}>
+    <div className={`flex ${compact ? "flex-row items-baseline gap-1.5" : "flex-col"} leading-tight shrink-0 min-w-0`}>
+      <span className="text-[10px] text-tertiary uppercase tracking-wider font-medium whitespace-nowrap">{label}</span>
+      <span className={`text-xs font-semibold tnum ${color} whitespace-nowrap`}>
         {value}
         {suffix && <span className="text-tertiary font-normal ml-1">{suffix}</span>}
       </span>

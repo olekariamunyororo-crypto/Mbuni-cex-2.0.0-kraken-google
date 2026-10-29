@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import { useOpenCEX } from "@/lib/opencex/store";
 import { fmtPrice, fmtQty, fmtTime } from "@/lib/opencex/format";
 
+import { CoinIcon } from "@/components/opencex/coin-icon";
+
 export function TradeTape({ pair, limit = 40 }: { pair: string; limit?: number }) {
   const trades = useOpenCEX((s) => s.trades);
   const p = useOpenCEX((s) => s.pairs.find((x) => x.symbol === pair));
@@ -13,12 +15,15 @@ export function TradeTape({ pair, limit = 40 }: { pair: string; limit?: number }
   return (
     <div className="flex flex-col h-full">
       <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wider text-secondary">Recent Trades</span>
+        <div className="flex items-center gap-1.5">
+          <CoinIcon asset={p.base} size={14} />
+          <span className="text-xs font-semibold uppercase tracking-wider text-white">Recent Trades</span>
+        </div>
         <span className="text-[10px] text-secondary tabular">{visible.length} trades</span>
       </div>
       <div className="grid grid-cols-3 gap-2 px-3 py-1.5 text-[10px] uppercase text-secondary border-b border-border">
-        <span>Price</span>
-        <span className="text-right">Size ({p.base})</span>
+        <span>Price ({p.quote})</span>
+        <span className="text-right inline-flex items-center justify-end gap-1">Size ({p.base})<CoinIcon asset={p.base} size={12} /></span>
         <span className="text-right">Time</span>
       </div>
       <div className="flex-1 overflow-y-auto">

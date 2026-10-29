@@ -6,6 +6,7 @@ import { fmtPrice, fmtQty } from "@/lib/opencex/format";
 import type { OrderType, Side } from "@/lib/opencex/types";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
+import { CoinIcon } from "@/components/opencex/coin-icon";
 import { cn } from "@/lib/utils";
 
 const ORDER_TYPES: { key: OrderType; label: string }[] = [
@@ -119,25 +120,27 @@ export function OrderTicket({
           type="button"
           onClick={() => setSide("BUY")}
           className={cn(
-            "h-11 rounded-xl text-sm font-semibold transition-all duration-150 flex items-center justify-center gap-1",
+            "h-11 rounded-xl text-sm font-semibold transition-all duration-150 flex items-center justify-center gap-1.5",
             isBuy
               ? "bg-success-soft text-primary shadow-sm border border-success/30 font-bold"
               : "text-secondary hover:text-white"
           )}
         >
-          Buy {baseAsset}
+          <CoinIcon asset={baseAsset} size={16} />
+          <span>Buy {baseAsset}</span>
         </button>
         <button
           type="button"
           onClick={() => setSide("SELL")}
           className={cn(
-            "h-11 rounded-xl text-sm font-semibold transition-all duration-150 flex items-center justify-center gap-1",
+            "h-11 rounded-xl text-sm font-semibold transition-all duration-150 flex items-center justify-center gap-1.5",
             !isBuy
               ? "bg-danger-soft text-danger shadow-sm border border-danger/30 font-bold"
               : "text-secondary hover:text-white"
           )}
         >
-          Sell {baseAsset}
+          <CoinIcon asset={baseAsset} size={16} />
+          <span>Sell {baseAsset}</span>
         </button>
       </div>
 
@@ -163,16 +166,18 @@ export function OrderTicket({
       {/* Available Balance */}
       <div className="flex items-center justify-between text-[12px] px-0.5">
         <span className="text-secondary font-medium">Available</span>
-        <span className="text-white tnum font-semibold">
-          {fmtQty(availableForOrder, isBuy ? 2 : p.baseDecimals)} {isBuy ? quoteAsset : baseAsset}
+        <span className="text-white tnum font-semibold inline-flex items-center gap-1.5">
+          <CoinIcon asset={isBuy ? quoteAsset : baseAsset} size={12} />
+          <span>{fmtQty(availableForOrder, isBuy ? 2 : p.baseDecimals)} {isBuy ? quoteAsset : baseAsset}</span>
         </span>
       </div>
 
       {/* Price Field */}
       {type !== "MARKET" ? (
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wider text-tertiary block font-semibold px-0.5">
-            Price ({quoteAsset})
+          <label className="text-[11px] uppercase tracking-wider text-tertiary font-semibold px-0.5 inline-flex items-center gap-1.5">
+            <CoinIcon asset={quoteAsset} size={12} />
+            <span>Price ({quoteAsset})</span>
           </label>
           <div className="h-[52px] px-3.5 rounded-xl flex items-center gap-2 bg-surface/80 border border-[var(--color-glass-border)] focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(163,230,53,0.15)] transition-all">
             <input
@@ -202,8 +207,9 @@ export function OrderTicket({
 
       {/* Amount Field */}
       <div className="space-y-1.5">
-        <label className="text-[11px] uppercase tracking-wider text-tertiary block font-semibold px-0.5">
-          Amount ({baseAsset})
+        <label className="text-[11px] uppercase tracking-wider text-tertiary font-semibold px-0.5 inline-flex items-center gap-1.5">
+          <CoinIcon asset={baseAsset} size={12} />
+          <span>Amount ({baseAsset})</span>
         </label>
         <div className="h-[52px] px-3.5 rounded-xl flex items-center gap-2 bg-surface/80 border border-[var(--color-glass-border)] focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(163,230,53,0.15)] transition-all">
           <input
@@ -215,7 +221,10 @@ export function OrderTicket({
             step={p.minQty}
             className="flex-1 min-w-0 bg-transparent text-[16px] text-white tnum font-semibold outline-none"
           />
-          <span className="text-secondary text-xs font-semibold">{baseAsset}</span>
+          <span className="text-secondary text-xs font-semibold inline-flex items-center gap-1">
+            <CoinIcon asset={baseAsset} size={14} />
+            <span>{baseAsset}</span>
+          </span>
         </div>
       </div>
 
@@ -255,6 +264,7 @@ export function OrderTicket({
         size="lg"
         fullWidth
         pill
+        icon={<CoinIcon asset={baseAsset} size={18} />}
         loading={submitting}
         onClick={submit}
         className="mt-1"

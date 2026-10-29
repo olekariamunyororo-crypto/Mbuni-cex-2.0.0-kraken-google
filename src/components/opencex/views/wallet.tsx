@@ -11,6 +11,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { DiscoverList, type DiscoverItem } from "@/components/ui/DiscoverList";
 import { ArrowDownToLine, ArrowUpFromLine, Shield, Plus, Copy, Check, Lock, Send, ShieldCheck, Key, ShieldAlert } from "lucide-react";
+import { CoinIcon } from "@/components/opencex/coin-icon";
 import { useState } from "react";
 import { toast } from "sonner";
 import type { Deposit, Withdrawal } from "@/lib/opencex/types";
@@ -157,7 +158,16 @@ export function WalletView() {
               rows={deposits}
               columns={[
                 { key: "timestamp", label: "Date & Time", render: (d: Deposit) => fmtDateTime(d.timestamp) },
-                { key: "asset", label: "Asset", render: (d: Deposit) => <span className="font-semibold text-white">{d.asset}</span> },
+                {
+                  key: "asset",
+                  label: "Asset",
+                  render: (d: Deposit) => (
+                    <span className="font-semibold text-white inline-flex items-center gap-1.5">
+                      <CoinIcon asset={d.asset} size={16} />
+                      {d.asset}
+                    </span>
+                  ),
+                },
                 { key: "chain", label: "Network", render: (d: Deposit) => d.chain },
                 { key: "amount", label: "Amount", right: true, render: (d: Deposit) => <span className="tnum font-semibold text-primary">+{fmtQty(d.amount, 6)} {d.asset}</span> },
                 { key: "address", label: "Address", render: (d: Deposit) => <span className="font-mono text-[11px] text-secondary">{shortAddr(d.address)}</span> },
@@ -176,7 +186,16 @@ export function WalletView() {
               rows={withdrawals}
               columns={[
                 { key: "timestamp", label: "Date & Time", render: (w: Withdrawal) => fmtDateTime(w.timestamp) },
-                { key: "asset", label: "Asset", render: (w: Withdrawal) => <span className="font-semibold text-white">{w.asset}</span> },
+                {
+                  key: "asset",
+                  label: "Asset",
+                  render: (w: Withdrawal) => (
+                    <span className="font-semibold text-white inline-flex items-center gap-1.5">
+                      <CoinIcon asset={w.asset} size={16} />
+                      {w.asset}
+                    </span>
+                  ),
+                },
                 { key: "chain", label: "Network", render: (w: Withdrawal) => w.chain },
                 { key: "amount", label: "Amount", right: true, render: (w: Withdrawal) => <span className="tnum font-semibold text-white">-{fmtQty(w.amount, 6)} {w.asset}</span> },
                 { key: "fee", label: "Network Fee", right: true, render: (w: Withdrawal) => <span className="tnum text-tertiary">{fmtQty(w.fee, 6)} {w.asset}</span> },
@@ -344,7 +363,10 @@ function WhitelistPanel({ whitelist }: { whitelist: ReturnType<typeof useOpenCEX
                 key={w.id}
                 className="grid grid-cols-12 gap-2 px-5 py-3.5 text-xs items-center hover:bg-white/[0.03] transition-colors"
               >
-                <span className="col-span-2 font-semibold text-white">{w.asset}</span>
+                <span className="col-span-2 font-semibold text-white inline-flex items-center gap-1.5">
+                  <CoinIcon asset={w.asset} size={16} />
+                  {w.asset}
+                </span>
                 <span className="col-span-2 text-secondary">{w.chain}</span>
                 <span className="col-span-4 font-mono text-[11px] text-tertiary">{shortAddr(w.address, 10, 8)}</span>
                 <span className="col-span-2 text-secondary">{w.label}</span>

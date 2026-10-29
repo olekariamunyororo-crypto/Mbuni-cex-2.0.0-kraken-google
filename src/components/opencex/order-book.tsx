@@ -4,6 +4,8 @@ import { useOpenCEX } from "@/lib/opencex/store";
 import { fmtPrice, fmtQty, fmtCompact } from "@/lib/opencex/format";
 import { useMemo } from "react";
 
+import { CoinIcon } from "@/components/opencex/coin-icon";
+
 export function OrderBook({ pair }: { pair: string }) {
   const book = useOpenCEX((s) => s.books[pair]);
   const p = useOpenCEX((s) => s.pairs.find((x) => x.symbol === pair));
@@ -27,14 +29,17 @@ export function OrderBook({ pair }: { pair: string }) {
   return (
     <div className="flex flex-col h-full">
       <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wider text-secondary">Order Book</span>
+        <div className="flex items-center gap-1.5">
+          <CoinIcon asset={p.base} size={16} />
+          <span className="text-xs font-semibold uppercase tracking-wider text-white">Order Book</span>
+        </div>
         <span className="text-[10px] text-secondary tabular">Depth · {p.symbol}</span>
       </div>
 
       <div className="grid grid-cols-3 gap-2 px-3 py-1.5 text-[10px] uppercase text-secondary border-b border-border">
-        <span>Price (USDT)</span>
-        <span className="text-right">Size ({p.base})</span>
-        <span className="text-right">Total ({p.base})</span>
+        <span className="inline-flex items-center gap-1"><CoinIcon asset={p.quote} size={12} />Price ({p.quote})</span>
+        <span className="text-right inline-flex items-center justify-end gap-1">Size ({p.base})<CoinIcon asset={p.base} size={12} /></span>
+        <span className="text-right inline-flex items-center justify-end gap-1">Total ({p.base})<CoinIcon asset={p.base} size={12} /></span>
       </div>
 
       {/* Asks — reversed so best ask is at the bottom */}

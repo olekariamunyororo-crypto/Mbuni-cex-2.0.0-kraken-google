@@ -32,6 +32,7 @@ export function AdminView() {
   const events = useOpenCEX((s) => s.events);
 
   const totalVol24h = Object.values(tickers).reduce((s, t) => s + (t?.quoteVolume ?? 0), 0);
+  const volDisplay = totalVol24h >= 100_000 ? `$${fmtCompact(totalVol24h)}` : fmtUSD(totalVol24h);
   const verifiedUsers = users.filter((u) => u.kycStatus === "VERIFIED").length;
   const pendingKyc = users.filter((u) => u.kycStatus === "PENDING").length;
 
@@ -39,10 +40,34 @@ export function AdminView() {
     <div className="p-3 md:p-4 space-y-4">
       {/* Top metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
-        <MetricCard icon={Activity} label="24h Volume" value={fmtUSD(totalVol24h)} sub="all markets" tone="up" />
-        <MetricCard icon={Users} label="Total Users" value={String(users.length * 4218)} sub={`${verifiedUsers * 4218} verified`} />
-        <MetricCard icon={AlertTriangle} label="Pending KYC" value={String(pendingKyc * 137)} sub="awaiting review" tone="warn" />
-        <MetricCard icon={ShieldCheck} label="System Health" value="6 / 7" sub="services healthy" tone={SERVICES.filter((s) => s.status === "healthy").length >= 6 ? "up" : "warn"} />
+        <MetricCard
+          icon={Activity}
+          label="24h Volume"
+          value={volDisplay}
+          sub="all markets"
+          tooltip={fmtUSD(totalVol24h)}
+          tone="up"
+        />
+        <MetricCard
+          icon={Users}
+          label="Total Users"
+          value={(users.length * 4218).toLocaleString()}
+          sub={`${(verifiedUsers * 4218).toLocaleString()} verified`}
+        />
+        <MetricCard
+          icon={AlertTriangle}
+          label="Pending KYC"
+          value={(pendingKyc * 137).toLocaleString()}
+          sub="awaiting review"
+          tone="warn"
+        />
+        <MetricCard
+          icon={ShieldCheck}
+          label="System Health"
+          value="6 / 7"
+          sub="services healthy"
+          tone={SERVICES.filter((s) => s.status === "healthy").length >= 6 ? "up" : "warn"}
+        />
       </div>
 
       <Tabs defaultValue="services">
@@ -200,7 +225,9 @@ export function AdminView() {
                   <span className="text-secondary">{p.base} / {p.quote}</span>
                   <span className="text-right">{p.tickSize}</span>
                   <span className="text-right">{p.minQty}</span>
-                  <span className="text-right">{t ? fmtUSD(t.quoteVolume) : "—"}</span>
+                  <span className="text-right font-medium" title={t ? fmtUSD(t.quoteVolume) : undefined}>
+                    {t ? (t.quoteVolume >= 100_000 ? `$${fmtCompact(t.quoteVolume)}` : fmtUSD(t.quoteVolume)) : "—"}
+                  </span>
                   <span>
                     <span className={`px-1.5 py-0.5 rounded text-[10px] ${p.status === "ACTIVE" ? "bg-primary/15 text-primary" : "bg-yellow-500/15 text-gold"}`}>
                       {p.status}
@@ -274,16 +301,48 @@ export function AdminView() {
   );
 }
 
-function MetricCard({ icon: Icon, label, value, sub, tone }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; sub: string; tone?: "up" | "warn" | "down" }) {
-  const color = tone === "up" ? "text-primary" : tone === "warn" ? "text-gold" : tone === "down" ? "text-danger" : "text-white";
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  tone,
+  tooltip,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  sub: string;
+  tone?: "up" | "warn" | "down";
+  tooltip?: string;
+}) {
+  const color =
+    tone === "up"
+      ? "text-primary"
+      : tone === "warn"
+      ? "text-gold"
+      : tone === "down"
+      ? "text-danger"
+      : "text-white";
   return (
-    <div className="glass-raised rounded-2xl p-3 md:p-4 border border-[var(--color-glass-border)] shadow-[0_12px_40px_rgba(0,0,0,0.5),inset_0_1px_0_var(--color-glass-highlight)]">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase text-secondary tracking-wider">{label}</span>
-        <Icon className="w-4 h-4 text-secondary" />
+    <div
+      className="glass-raised rounded-2xl p-3 md:p-4 border border-[var(--color-glass-border)] shadow-[0_12px_40px_rgba(0,0,0,0.5),inset_0_1px_0_var(--color-glass-highlight)] min-w-0 flex flex-col justify-between overflow-hidden"
+      title={tooltip || value}
+    >
+      <div className="flex items-center justify-between gap-1.5 min-w-0">
+        <span className="text-[10px] sm:text-[11px] uppercase text-secondary tracking-wider font-semibold truncate">
+          {label}
+        </span>
+        <Icon className="w-4 h-4 text-secondary shrink-0" />
       </div>
-      <div className={`text-lg md:text-2xl font-bold tnum mt-1 ${color}`}>{value}</div>
-      <div className="text-[11px] text-secondary mt-0.5">{sub}</div>
+      <div className="mt-2 min-w-0">
+        <div
+          className={`text-base sm:text-lg md:text-xl lg:text-2xl font-bold tnum truncate tracking-tight leading-tight ${color}`}
+        >
+          {value}
+        </div>
+        <div className="text-[11px] text-secondary mt-1 truncate block">{sub}</div>
+      </div>
     </div>
   );
 }

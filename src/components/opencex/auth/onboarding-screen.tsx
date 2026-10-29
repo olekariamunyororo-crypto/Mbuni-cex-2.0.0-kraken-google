@@ -18,6 +18,7 @@ import {
 import { useOpenCEX } from "@/lib/opencex/store";
 import { ASSET_METADATA } from "@/lib/opencex/seed";
 import { OstrichLogo } from "@/components/opencex/ostrich-logo";
+import { CoinIcon } from "@/components/opencex/coin-icon";
 import { toast } from "sonner";
 import { apiSaveOnboarding } from "next-auth/react";
 import { Button } from "@/components/ui/Button";
@@ -293,12 +294,7 @@ function StepMarkets({
                 active ? "border-primary bg-primary/10" : "border-border hover:bg-elevated/50"
               }`}
             >
-              <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-                style={{ background: meta?.color ?? "#666" }}
-              >
-                {base.slice(0, 1)}
-              </div>
+              <CoinIcon asset={base} size={28} />
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium">{sym}</div>
                 <div className="text-[10px] text-secondary truncate">{meta?.name}</div>

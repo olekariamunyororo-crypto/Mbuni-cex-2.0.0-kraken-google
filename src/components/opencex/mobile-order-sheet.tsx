@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { OrderTicket } from "@/components/ui/OrderTicket";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { CoinIcon } from "@/components/opencex/coin-icon";
 import type { Side } from "@/lib/opencex/types";
 
 /**
@@ -28,16 +29,18 @@ export function MobileOrderSheet({ pair }: { pair: string }) {
           <button
             type="button"
             onClick={() => openWith("BUY")}
-            className="h-11 rounded-xl bg-success-soft hover:bg-success-soft/80 border border-success/40 text-primary font-bold text-sm shadow-[0_4px_16px_rgba(163,230,53,0.15)] transition-all active:scale-[0.98]"
+            className="h-11 rounded-xl bg-success-soft hover:bg-success-soft/80 border border-success/40 text-primary font-bold text-sm shadow-[0_4px_16px_rgba(163,230,53,0.15)] transition-all active:scale-[0.98] flex items-center justify-center gap-1.5"
           >
-            Buy {baseAsset}
+            <CoinIcon asset={baseAsset} size={16} />
+            <span>Buy {baseAsset}</span>
           </button>
           <button
             type="button"
             onClick={() => openWith("SELL")}
-            className="h-11 rounded-xl bg-danger-soft hover:bg-danger-soft/80 border border-danger/40 text-danger font-bold text-sm shadow-[0_4px_16px_rgba(255,92,92,0.15)] transition-all active:scale-[0.98]"
+            className="h-11 rounded-xl bg-danger-soft hover:bg-danger-soft/80 border border-danger/40 text-danger font-bold text-sm shadow-[0_4px_16px_rgba(255,92,92,0.15)] transition-all active:scale-[0.98] flex items-center justify-center gap-1.5"
           >
-            Sell {baseAsset}
+            <CoinIcon asset={baseAsset} size={16} />
+            <span>Sell {baseAsset}</span>
           </button>
         </div>
       </div>
@@ -51,6 +54,7 @@ export function MobileOrderSheet({ pair }: { pair: string }) {
           <SheetHeader className="px-5 py-3 border-b border-divider">
             <SheetTitle className="text-base font-bold flex items-center justify-between text-white">
               <div className="flex items-center gap-2">
+                <CoinIcon asset={baseAsset} size={20} />
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                     side === "BUY"

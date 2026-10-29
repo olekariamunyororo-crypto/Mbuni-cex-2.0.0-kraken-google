@@ -4,6 +4,7 @@ import React from "react";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtPrice, fmtPct, fmtUSD, fmtQty } from "@/lib/opencex/format";
+import { CoinIcon } from "@/components/opencex/coin-icon";
 
 export interface AssetRowProps {
   symbol: string;
@@ -62,18 +63,9 @@ export function AssetRow({
         className
       )}
     >
-      {/* Left: Emblem + Asset Info */}
+      {/* Left: Coin Icon + Asset Info per §6.3 & §6.11 */}
       <div className="flex items-center gap-3 min-w-0">
-        <div
-          className="w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-xs shrink-0 shadow-inner"
-          style={{
-            backgroundColor: `${assetColor}18`,
-            color: assetColor,
-            border: `1px solid ${assetColor}33`,
-          }}
-        >
-          {baseSymbol.slice(0, 3)}
-        </div>
+        <CoinIcon asset={baseSymbol} size={36} />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-[15px] font-semibold text-white tracking-tight">{baseSymbol}</span>

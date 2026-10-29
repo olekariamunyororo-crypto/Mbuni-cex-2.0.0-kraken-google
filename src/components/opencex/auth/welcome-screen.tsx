@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, Cpu, ShieldCheck, CandlestickChart, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ASSET_METADATA } from "@/lib/opencex/seed";
+import { CoinIcon } from "@/components/opencex/coin-icon";
 
 const COINS = ["BTC", "ETH", "SOL", "USDT", "BNB", "XRP", "ARB", "OP"];
 
@@ -225,21 +226,19 @@ function CoinsVisual() {
           return (
             <motion.div
               key={c}
-              className="aspect-square rounded-xl border border-border bg-card flex flex-col items-center justify-center gap-1"
+              className="aspect-square rounded-xl border border-border bg-card flex flex-col items-center justify-center gap-1.5"
               initial={{ opacity: 0, y: 20, scale: 0.8 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ delay: i * 0.07, type: "spring", stiffness: 200 }}
               whileHover={{ scale: 1.08, y: -4 }}
             >
               <motion.div
-                className="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold text-white"
-                style={{ background: meta?.color ?? "#666" }}
                 animate={{ y: [0, -3, 0] }}
                 transition={{ duration: 2 + i * 0.2, repeat: Infinity, ease: "easeInOut" }}
               >
-                {c.slice(0, 2)}
+                <CoinIcon asset={c} size={36} />
               </motion.div>
-              <span className="text-[10px] font-medium">{c}</span>
+              <span className="text-[10px] font-semibold text-white">{c}</span>
             </motion.div>
           );
         })}

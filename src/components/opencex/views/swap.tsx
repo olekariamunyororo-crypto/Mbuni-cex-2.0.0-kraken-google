@@ -8,6 +8,8 @@ import { ArrowDownUp, Settings2, ShieldCheck, Zap, Info, ChevronDown } from "luc
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { AIInsightCard } from "@/components/ui/AIInsightCard";
+import { CoinIcon } from "@/components/opencex/coin-icon";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 export function SwapView() {
@@ -170,8 +172,8 @@ export function SwapView() {
           <div className="p-3.5 rounded-2xl bg-surface/90 border border-[var(--color-glass-border)] space-y-2">
             <div className="flex items-center justify-between text-[12px] text-secondary">
               <span className="font-medium">You pay</span>
-              <span className="tnum font-medium">
-                Balance: <span className="text-white font-semibold">{fmtQty(fromBalance, 4)} {fromAsset}</span>
+              <span className="tnum font-medium inline-flex items-center gap-1.5">
+                Balance: <CoinIcon asset={fromAsset} size={14} /><span className="text-white font-semibold">{fmtQty(fromBalance, 4)} {fromAsset}</span>
               </span>
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -215,8 +217,8 @@ export function SwapView() {
           <div className="p-3.5 rounded-2xl bg-surface/90 border border-[var(--color-glass-border)] space-y-2">
             <div className="flex items-center justify-between text-[12px] text-secondary">
               <span className="font-medium">You receive (estimated)</span>
-              <span className="tnum font-medium">
-                Balance: <span className="text-white font-semibold">{fmtQty(toBalance, 4)} {toAsset}</span>
+              <span className="tnum font-medium inline-flex items-center gap-1.5">
+                Balance: <CoinIcon asset={toAsset} size={14} /><span className="text-white font-semibold">{fmtQty(toBalance, 4)} {toAsset}</span>
               </span>
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -285,20 +287,54 @@ function AssetPicker({
   onChange: (asset: string) => void;
   assets: string[];
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="appearance-none h-10 pl-3 pr-8 rounded-xl bg-elevated border border-white/10 text-white font-semibold text-sm cursor-pointer outline-none hover:bg-white/10 transition-colors"
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-2 h-10 px-3 rounded-xl bg-elevated/80 hover:bg-elevated border border-[var(--color-glass-border)] text-white font-semibold text-sm transition-all select-none active:scale-95 shadow-sm shrink-0"
+        >
+          <CoinIcon asset={value} size={20} />
+          <span className="font-bold tracking-tight">{value}</span>
+          <ChevronDown className="w-3.5 h-3.5 text-secondary opacity-70 ml-0.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={6}
+        className="glass-raised border border-[var(--color-glass-border)] p-1.5 w-48 max-h-72 overflow-y-auto no-scrollbar rounded-2xl shadow-2xl glass-edge z-50 text-white"
       >
-        {assets.map((a) => (
-          <option key={a} value={a} className="bg-bg text-white">
-            {a}
-          </option>
-        ))}
-      </select>
-      <ChevronDown className="w-4 h-4 text-secondary absolute right-2.5 top-3 pointer-events-none" />
-    </div>
+        <div className="space-y-0.5">
+          {assets.map((a) => {
+            const isSelected = a === value;
+            const assetInfo = ASSET_METADATA[a];
+            return (
+              <button
+                key={a}
+                type="button"
+                onClick={() => {
+                  onChange(a);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition-all duration-150 cursor-pointer select-none",
+                  isSelected
+                    ? "bg-white/10 text-white font-bold"
+                    : "text-secondary hover:text-white hover:bg-white/[0.05]"
+                )}
+              >
+                <CoinIcon asset={a} size={22} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-white tracking-tight leading-none">{a}</div>
+                  <div className="text-[10px] text-tertiary truncate mt-0.5">{assetInfo?.name ?? a}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
