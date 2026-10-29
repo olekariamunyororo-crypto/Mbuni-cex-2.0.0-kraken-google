@@ -1,8 +1,24 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createChart,
+  CandlestickSeries,
+  HistogramSeries,
+  ColorType,
+  CrosshairMode,
+  TickMarkType,
+  type IChartApi,
+  type ISeriesApi,
+  type UTCTimestamp,
+  type CandlestickData,
+  type HistogramData,
+  type Time,
+} from "lightweight-charts";
+import { ChevronsRight } from "lucide-react";
 import { useOpenCEX } from "@/lib/opencex/store";
-import { fmtPrice, fmtCompact, fmtTime } from "@/lib/opencex/format";
+import { fmtPrice, fmtCompact } from "@/lib/opencex/format";
+import { aggregateKlines } from "@/lib/opencex/klines";
 import type { Kline } from "@/lib/opencex/types";
 
 const TIMEFRAMES = [
@@ -15,87 +31,219 @@ const TIMEFRAMES = [
 
 const EMPTY_KLINES: Kline[] = [];
 
+// Design-system colours (lime = up, red = down)
+const UP = "#a3e635";
+const DOWN = "#ff5c5c";
+const UP_VOL = "rgba(163,230,53,0.35)";
+const DOWN_VOL = "rgba(255,92,92,0.35)";
+const GRID = "rgba(255,255,255,0.06)";
+const TEXT = "#9ca3af";
+const INITIAL_VISIBLE = 100; // candles shown on load — scroll/zoom for more
+
+const toCandle = (k: Kline): CandlestickData<UTCTimestamp> => ({
+  time: Math.floor(k.openTime / 1000) as UTCTimestamp,
+  open: k.open, high: k.high, low: k.low, close: k.close,
+});
+const toVolume = (k: Kline): HistogramData<UTCTimestamp> => ({
+  time: Math.floor(k.openTime / 1000) as UTCTimestamp,
+  value: k.volume,
+  color: k.close >= k.open ? UP_VOL : DOWN_VOL,
+});
+
+/** Ensure candles are strictly sorted ascending by timestamp without any duplicate times. */
+function prepareSeriesData(klines: Kline[]) {
+  const candles: CandlestickData<UTCTimestamp>[] = [];
+  const volumes: HistogramData<UTCTimestamp>[] = [];
+  let lastTime = -1;
+
+  for (const k of klines) {
+    const time = Math.floor(k.openTime / 1000) as UTCTimestamp;
+    if (time <= lastTime) {
+      if (time === lastTime && candles.length > 0) {
+        candles[candles.length - 1] = toCandle(k);
+        volumes[volumes.length - 1] = toVolume(k);
+      }
+      continue;
+    }
+    candles.push(toCandle(k));
+    volumes.push(toVolume(k));
+    lastTime = time;
+  }
+
+  return { candles, volumes };
+}
+
+/** Lightweight Charts is UTC-only by default; format axis/crosshair labels in the user's local time. */
+const pad2 = (n: number) => String(n).padStart(2, "0");
+function localTick(time: Time, type: TickMarkType): string {
+  const d = new Date((time as number) * 1000);
+  if (type === TickMarkType.Year) return String(d.getFullYear());
+  if (type === TickMarkType.Month) return d.toLocaleString("en-US", { month: "short" });
+  if (type === TickMarkType.DayOfMonth) return String(d.getDate());
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function localCrosshairTime(time: Time): string {
+  const d = new Date((time as number) * 1000);
+  return `${d.toLocaleString("en-US", { month: "short" })} ${d.getDate()}  ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 export function PriceChart({ pair }: { pair: string }) {
   const klines = useOpenCEX((s) => s.klines[pair]) ?? EMPTY_KLINES;
   const book = useOpenCEX((s) => s.books[pair]);
   const p = useOpenCEX((s) => s.pairs.find((x) => x.symbol === pair));
+  const liveMode = useOpenCEX((s) => s.liveMode);
+  const feedConnected = useOpenCEX((s) => s.feedConnected);
   const [tf, setTf] = useState(1);
   const [hover, setHover] = useState<Kline | null>(null);
 
-  const aggregated = useMemo(() => {
-    if (!klines.length) return [];
-    const factor = tf;
-    const out: Kline[] = [];
-    for (let i = 0; i < klines.length; i += factor) {
-      const chunk = klines.slice(i, i + factor);
-      if (!chunk.length) continue;
-      out.push({
-        openTime: chunk[0].openTime,
-        open: chunk[0].open,
-        high: Math.max(...chunk.map((c) => c.high)),
-        low: Math.min(...chunk.map((c) => c.low)),
-        close: chunk[chunk.length - 1].close,
-        volume: chunk.reduce((s, c) => s + c.volume, 0),
-      });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const loadedRef = useRef<{ key: string; first: number; len: number } | null>(null);
+  const byTimeRef = useRef<Map<number, Kline>>(new Map());
+
+  const aggregated = useMemo(() => aggregateKlines(klines, tf), [klines, tf]);
+  const decimals = p?.priceDecimals ?? 2;
+
+  // ── create the chart once ──
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const chart = createChart(el, {
+      autoSize: true,
+      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: TEXT, fontSize: 11 },
+      grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.08)", scaleMargins: { top: 0.06, bottom: 0.22 } },
+      timeScale: { borderColor: "rgba(255,255,255,0.08)", timeVisible: true, secondsVisible: false, rightOffset: 6, tickMarkFormatter: localTick },
+      localization: { timeFormatter: localCrosshairTime },
+      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+    });
+    const candles = chart.addSeries(CandlestickSeries, {
+      upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN,
+      priceLineVisible: true, lastValueVisible: true,
+    });
+    const volume = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "", lastValueVisible: false, priceLineVisible: false });
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+
+    chart.subscribeCrosshairMove((param) => {
+      if (!param.time) { setHover(null); return; }
+      setHover(byTimeRef.current.get((param.time as number) * 1000) ?? null);
+    });
+
+    chartRef.current = chart;
+    candleRef.current = candles;
+    volumeRef.current = volume;
+    return () => {
+      chart.remove();
+      chartRef.current = candleRef.current = volumeRef.current = null;
+      loadedRef.current = null;
+    };
+  }, []);
+
+  // ── price precision follows the pair ──
+  useEffect(() => {
+    const minMove = Math.pow(10, -decimals);
+    candleRef.current?.applyOptions({ priceFormat: { type: "price", precision: decimals, minMove } });
+  }, [decimals]);
+
+  // ── push data: full reset on pair/timeframe/history change, safe incremental update otherwise ──
+  useEffect(() => {
+    const candles = candleRef.current, volume = volumeRef.current, chart = chartRef.current;
+    if (!candles || !volume || !chart || aggregated.length === 0) return;
+
+    byTimeRef.current = new Map(aggregated.map((k) => [k.openTime, k]));
+    const key = `${pair}|${tf}`;
+    const prev = loadedRef.current;
+    const first = aggregated[0].openTime;
+    const isNewSeries = !prev || prev.key !== key;
+
+    if (isNewSeries) {
+      const { candles: candleData, volumes: volumeData } = prepareSeriesData(aggregated);
+      candles.setData(candleData);
+      volume.setData(volumeData);
+      const n = candleData.length;
+      chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - INITIAL_VISIBLE), to: n + 6 });
+      loadedRef.current = { key, first, len: aggregated.length };
+      return;
     }
-    return out;
-  }, [klines, tf]);
+
+    // If historical data arrived or series changed shape substantially
+    if (prev.first !== first || aggregated.length < prev.len) {
+      const { candles: candleData, volumes: volumeData } = prepareSeriesData(aggregated);
+      candles.setData(candleData);
+      volume.setData(volumeData);
+      loadedRef.current = { key, first, len: aggregated.length };
+      return;
+    }
+
+    // Incremental update:
+    if (aggregated.length === prev.len) {
+      // Normal tick within the active open candle: only the last candle changes
+      try {
+        const last = aggregated[aggregated.length - 1];
+        candles.update(toCandle(last));
+        volume.update(toVolume(last));
+      } catch {
+        const { candles: candleData, volumes: volumeData } = prepareSeriesData(aggregated);
+        candles.setData(candleData);
+        volume.setData(volumeData);
+      }
+    } else if (aggregated.length === prev.len + 1) {
+      // Exactly one new candle opened (e.g. minute rollover)
+      try {
+        const prevCandle = aggregated[aggregated.length - 2];
+        const lastCandle = aggregated[aggregated.length - 1];
+        candles.update(toCandle(prevCandle));
+        volume.update(toVolume(prevCandle));
+        candles.update(toCandle(lastCandle));
+        volume.update(toVolume(lastCandle));
+      } catch {
+        const { candles: candleData, volumes: volumeData } = prepareSeriesData(aggregated);
+        candles.setData(candleData);
+        volume.setData(volumeData);
+      }
+    } else {
+      // More than 1 candle arrived (e.g. background tab resumed)
+      const { candles: candleData, volumes: volumeData } = prepareSeriesData(aggregated);
+      candles.setData(candleData);
+      volume.setData(volumeData);
+    }
+
+    loadedRef.current = { key, first, len: aggregated.length };
+  }, [aggregated, pair, tf]);
 
   if (!p) return null;
 
-  const display = hover ?? aggregated[aggregated.length - 1] ?? null;
-  const lastPrice = book?.lastPrice ?? display?.close ?? 0;
-  const firstPrice = aggregated[0]?.open ?? lastPrice;
+  const last = aggregated[aggregated.length - 1] ?? null;
+  const display = hover ?? last;
+  const lastPrice = book?.lastPrice ?? last?.close ?? 0;
+  const firstPrice = aggregated[Math.max(0, aggregated.length - INITIAL_VISIBLE)]?.open ?? lastPrice;
   const changePct = firstPrice ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
   const up = changePct >= 0;
-
-  // Chart geometry
-  const W = 800;
-  const H = 360;
-  const volH = 60;
-  const priceH = H - volH - 20;
-  const padL = 8;
-  const padR = 70;
-  const padB = 18;
-  const chartW = W - padL - padR;
-  const chartH = priceH - padB;
-  const minPrice = aggregated.length ? Math.min(...aggregated.map((k) => k.low)) : 0;
-  const maxPrice = aggregated.length ? Math.max(...aggregated.map((k) => k.high)) : 1;
-  const priceRange = (maxPrice - minPrice) || 1;
-  const maxVol = aggregated.length ? Math.max(...aggregated.map((k) => k.volume), 1) : 1;
-
-  const xFor = (i: number) => padL + (aggregated.length <= 1 ? chartW / 2 : (i / (aggregated.length - 1)) * chartW);
-  const yFor = (price: number) => {
-    if (!Number.isFinite(price) || !Number.isFinite(minPrice) || !Number.isFinite(priceRange) || priceRange === 0) return padB + chartH / 2;
-    return padB + (1 - (price - minPrice) / priceRange) * chartH;
-  };
-  const candleW = aggregated.length ? Math.max(2, (chartW / aggregated.length) * 0.7) : 2;
-
-  // Grid lines + Y axis labels
-  const gridLines = Array.from({ length: 5 }, (_, i) => {
-    const v = minPrice + (priceRange * i) / 4;
-    return { y: yFor(v), v };
-  });
+  const ohlcUp = display ? display.close >= display.open : up;
+  const status = !liveMode ? "SIMULATED" : feedConnected ? "LIVE · BINANCE" : "CONNECTING…";
+  const tfLabel = TIMEFRAMES.find((t) => t.minutes === tf)?.label;
 
   return (
     <div className="flex flex-col h-full">
       <div className="px-2 md:px-3 py-2 border-b border-border flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
-          <span className="text-xs font-semibold uppercase tracking-wider text-secondary shrink-0">{p.symbol}</span>
-          {/* Compact change indicator — mobile only */}
+          <span className="text-xs font-semibold uppercase tracking-wider text-secondary shrink-0">{p.symbol} · {tfLabel}</span>
           <span className={`md:hidden px-1.5 py-0.5 rounded text-[10px] ${up ? "bg-primary/15 text-primary" : "bg-danger/15 text-danger"}`}>
             {up ? "+" : ""}{changePct.toFixed(2)}%
           </span>
-          {/* Full OHLC — desktop only */}
           <div className="hidden md:flex items-center gap-1 text-xs tabular">
             <span className="text-secondary">O</span>
-            <span className={up ? "text-primary" : "text-danger"}>{fmtPrice(display?.open, p.priceDecimals)}</span>
+            <span className={ohlcUp ? "text-primary" : "text-danger"}>{fmtPrice(display?.open, decimals)}</span>
             <span className="text-secondary ml-1">H</span>
-            <span className={up ? "text-primary" : "text-danger"}>{fmtPrice(display?.high, p.priceDecimals)}</span>
+            <span className={ohlcUp ? "text-primary" : "text-danger"}>{fmtPrice(display?.high, decimals)}</span>
             <span className="text-secondary ml-1">L</span>
-            <span className={up ? "text-primary" : "text-danger"}>{fmtPrice(display?.low, p.priceDecimals)}</span>
+            <span className={ohlcUp ? "text-primary" : "text-danger"}>{fmtPrice(display?.low, decimals)}</span>
             <span className="text-secondary ml-1">C</span>
-            <span className={up ? "text-primary" : "text-danger"}>{fmtPrice(display?.close ?? lastPrice, p.priceDecimals)}</span>
+            <span className={ohlcUp ? "text-primary" : "text-danger"}>{fmtPrice(display?.close ?? lastPrice, decimals)}</span>
             <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${up ? "bg-primary/15 text-primary" : "bg-danger/15 text-danger"}`}>
               {up ? "+" : ""}{changePct.toFixed(2)}%
             </span>
@@ -106,114 +254,33 @@ export function PriceChart({ pair }: { pair: string }) {
             <button
               key={t.label}
               onClick={() => setTf(t.minutes)}
-              className={`px-2 py-0.5 text-[11px] rounded ${
-                tf === t.minutes ? "bg-elevated text-foreground" : "text-secondary hover:bg-elevated/70"
-              }`}
+              className={`px-2 py-0.5 text-[11px] rounded ${tf === t.minutes ? "bg-elevated text-foreground" : "text-secondary hover:bg-elevated/70"}`}
             >
               {t.label}
             </button>
           ))}
+          <button
+            title="Jump to latest candle"
+            aria-label="Jump to latest candle"
+            onClick={() => chartRef.current?.timeScale().scrollToRealTime()}
+            className="ml-1 p-1 rounded text-secondary hover:bg-elevated/70"
+          >
+            <ChevronsRight className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
-      <div className="flex-1 relative overflow-hidden">
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          preserveAspectRatio="none"
-          className="w-full h-full"
-          onMouseMove={(e) => {
-            const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
-            const x = ((e.clientX - rect.left) / rect.width) * W;
-            const idx = Math.floor(((x - padL) / chartW) * aggregated.length);
-            const k = aggregated[idx];
-            if (k) setHover(k);
-          }}
-          onMouseLeave={() => setHover(null)}
-        >
-          {/* grid */}
-          {gridLines.map((g, i) => (
-            <g key={i}>
-              <line x1={padL} y1={g.y} x2={padL + chartW} y2={g.y} stroke="oklch(0.30 0.008 250)" strokeDasharray="2 3" />
-              <text x={padL + chartW + 4} y={g.y + 3} fill="oklch(0.68 0.008 250)" fontSize="10" className="tabular">
-                {fmtPrice(g.v, p.priceDecimals)}
-              </text>
-            </g>
-          ))}
-
-          {/* candles */}
-          {aggregated.map((k, i) => {
-            const x = xFor(i);
-            const isUp = k.close >= k.open;
-            const color = isUp ? "oklch(0.72 0.18 152)" : "oklch(0.66 0.22 22)";
-            const yOpen = yFor(k.open);
-            const yClose = yFor(k.close);
-            const yHigh = yFor(k.high);
-            const yLow = yFor(k.low);
-            const top = Math.min(yOpen, yClose);
-            const h = Math.max(1, Math.abs(yClose - yOpen));
-            return (
-              <g key={i}>
-                <line x1={x} y1={yHigh} x2={x} y2={yLow} stroke={color} strokeWidth="1" />
-                <rect x={x - candleW / 2} y={top} width={candleW} height={h} fill={color} opacity={0.9} />
-                {/* volume bar */}
-                <rect
-                  x={x - candleW / 2}
-                  y={priceH + (1 - k.volume / maxVol) * volH}
-                  width={candleW}
-                  height={(k.volume / maxVol) * volH}
-                  fill={color}
-                  opacity={0.3}
-                />
-              </g>
-            );
-          })}
-
-          {/* last price line */}
-          <line
-            x1={padL}
-            y1={yFor(lastPrice)}
-            x2={padL + chartW}
-            y2={yFor(lastPrice)}
-            stroke={up ? "oklch(0.72 0.18 152)" : "oklch(0.66 0.22 22)"}
-            strokeDasharray="3 3"
-            strokeWidth="1"
-          />
-          <rect
-            x={padL + chartW}
-            y={yFor(lastPrice) - 8}
-            width={padR}
-            height={16}
-            fill={up ? "oklch(0.72 0.18 152)" : "oklch(0.66 0.22 22)"}
-          />
-          <text
-            x={padL + chartW + 4}
-            y={yFor(lastPrice) + 3}
-            fill="#000"
-            fontSize="10"
-            fontWeight="600"
-            className="tabular"
-          >
-            {fmtPrice(lastPrice, p.priceDecimals)}
-          </text>
-
-          {/* time axis */}
-          {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-            const idx = Math.floor(t * (aggregated.length - 1));
-            const k = aggregated[idx];
-            if (!k) return null;
-            return (
-              <text key={t} x={xFor(idx)} y={H - 4} fill="oklch(0.68 0.008 250)" fontSize="9" className="tabular" textAnchor="middle">
-                {fmtTime(k.openTime)}
-              </text>
-            );
-          })}
-        </svg>
+      <div className="flex-1 relative min-h-[160px]">
+        <div ref={containerRef} className="absolute inset-0" />
+        {aggregated.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-secondary pointer-events-none">Loading candles…</div>
+        )}
       </div>
 
       <div className="px-2 md:px-3 py-1 border-t border-border flex items-center justify-between text-[10px] text-secondary">
-        <span>Vol: <span className="tabular text-foreground">{fmtCompact(aggregated.reduce((s, k) => s + k.volume, 0))} {p.base}</span></span>
-        <span className="hidden sm:inline">{aggregated.length} candles · {hover ? "Hover: " + fmtTime(hover.openTime) : "LIVE · BINANCE"}</span>
-        <span className="sm:hidden">{hover ? fmtTime(hover.openTime) : "LIVE"}</span>
+        <span>Vol: <span className="tabular text-foreground">{fmtCompact(display?.volume ?? 0)} {p.base}</span></span>
+        <span className="hidden sm:inline">{aggregated.length} × {tfLabel} candles · drag to pan · scroll to zoom · {status}</span>
+        <span className="sm:hidden">{status}</span>
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ import { OnboardingScreen } from "@/components/opencex/auth/onboarding-screen";
 import { KycScreen } from "@/components/opencex/auth/kyc-screen";
 import { Providers } from "@/components/opencex/providers";
 import { Toaster } from "@/components/ui/sonner";
+import { cn } from "@/lib/utils";
 
 export type ViewKey =
   | "markets"
@@ -132,13 +133,18 @@ function AppShell({
   sessionUser?: SessionUserLike;
 }) {
   return (
-    <div className="min-h-screen flex bg-background text-foreground">
-      <div className="hidden md:flex">
+    <div className="h-screen flex bg-background text-foreground overflow-hidden">
+      <div className="hidden md:flex shrink-0">
         <Sidebar view={view} onChange={onChangeView} onLogout={onLogout} sessionUser={sessionUser} />
       </div>
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         <TopBar view={view} sessionUser={sessionUser} onLogout={onLogout} />
-        <main className="flex-1 overflow-auto pb-20 md:pb-3">
+        <main
+          className={cn(
+            "flex-1 min-w-0 min-h-0",
+            view === "trading" ? "overflow-hidden" : "overflow-auto pb-20 md:pb-3"
+          )}
+        >
           {view === "markets" && (
             <MarketsView
               onOpenTrading={(p) => {

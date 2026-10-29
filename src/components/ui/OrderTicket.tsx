@@ -107,39 +107,44 @@ export function OrderTicket({
 
   if (!p) return null;
 
+  const isPro = mode === "pro";
+
   return (
     <div
       className={cn(
-        "glass-raised rounded-3xl p-5 flex flex-col gap-4 border border-[var(--color-glass-border)]",
+        "glass-raised flex flex-col border border-[var(--color-glass-border)]",
+        isPro ? "rounded-2xl p-3 gap-2.5 text-xs" : "rounded-3xl p-5 gap-4",
         className
       )}
     >
       {/* Buy / Sell Segmented Control */}
-      <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-surface/90 border border-white/5">
+      <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-surface/90 border border-white/5">
         <button
           type="button"
           onClick={() => setSide("BUY")}
           className={cn(
-            "h-11 rounded-xl text-sm font-semibold transition-all duration-150 flex items-center justify-center gap-1.5",
+            "rounded-xl font-semibold transition-all duration-150 flex items-center justify-center gap-1.5",
+            isPro ? "h-9 text-xs" : "h-11 text-sm",
             isBuy
               ? "bg-success-soft text-primary shadow-sm border border-success/30 font-bold"
               : "text-secondary hover:text-white"
           )}
         >
-          <CoinIcon asset={baseAsset} size={16} />
+          <CoinIcon asset={baseAsset} size={isPro ? 14 : 16} />
           <span>Buy {baseAsset}</span>
         </button>
         <button
           type="button"
           onClick={() => setSide("SELL")}
           className={cn(
-            "h-11 rounded-xl text-sm font-semibold transition-all duration-150 flex items-center justify-center gap-1.5",
+            "rounded-xl font-semibold transition-all duration-150 flex items-center justify-center gap-1.5",
+            isPro ? "h-9 text-xs" : "h-11 text-sm",
             !isBuy
               ? "bg-danger-soft text-danger shadow-sm border border-danger/30 font-bold"
               : "text-secondary hover:text-white"
           )}
         >
-          <CoinIcon asset={baseAsset} size={16} />
+          <CoinIcon asset={baseAsset} size={isPro ? 14 : 16} />
           <span>Sell {baseAsset}</span>
         </button>
       </div>
@@ -152,9 +157,10 @@ export function OrderTicket({
             type="button"
             onClick={() => setType(t.key)}
             className={cn(
-              "flex-1 py-1 px-2.5 rounded-lg text-[12px] font-medium transition-all text-center whitespace-nowrap",
+              "flex-1 rounded-lg font-medium transition-all text-center whitespace-nowrap",
+              isPro ? "py-0.5 px-1.5 text-[11px]" : "py-1 px-2.5 text-[12px]",
               type === t.key
-                ? "bg-elevated text-white shadow-sm border border-white/10"
+                ? "bg-elevated text-white shadow-sm border border-white/10 font-bold"
                 : "text-secondary hover:text-white"
             )}
           >
@@ -164,7 +170,7 @@ export function OrderTicket({
       </div>
 
       {/* Available Balance */}
-      <div className="flex items-center justify-between text-[12px] px-0.5">
+      <div className="flex items-center justify-between text-[11px] px-0.5">
         <span className="text-secondary font-medium">Available</span>
         <span className="text-white tnum font-semibold inline-flex items-center gap-1.5">
           <CoinIcon asset={isBuy ? quoteAsset : baseAsset} size={12} />
@@ -174,12 +180,15 @@ export function OrderTicket({
 
       {/* Price Field */}
       {type !== "MARKET" ? (
-        <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wider text-tertiary font-semibold px-0.5 inline-flex items-center gap-1.5">
-            <CoinIcon asset={quoteAsset} size={12} />
+        <div className={isPro ? "space-y-1" : "space-y-1.5"}>
+          <label className="text-[10px] uppercase tracking-wider text-tertiary font-semibold px-0.5 inline-flex items-center gap-1.5">
+            <CoinIcon asset={quoteAsset} size={11} />
             <span>Price ({quoteAsset})</span>
           </label>
-          <div className="h-[52px] px-3.5 rounded-xl flex items-center gap-2 bg-surface/80 border border-[var(--color-glass-border)] focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(163,230,53,0.15)] transition-all">
+          <div className={cn(
+            "px-3 rounded-xl flex items-center gap-2 bg-surface/80 border border-[var(--color-glass-border)] focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(163,230,53,0.15)] transition-all",
+            isPro ? "h-9" : "h-[52px]"
+          )}>
             <input
               type="number"
               inputMode="decimal"
@@ -187,31 +196,40 @@ export function OrderTicket({
               onChange={(e) => setPrice(e.target.value)}
               placeholder={bestPrice ? bestPrice.toFixed(p.priceDecimals) : "0.00"}
               step={p.tickSize}
-              className="flex-1 min-w-0 bg-transparent text-[16px] text-white tnum font-semibold outline-none"
+              className={cn(
+                "flex-1 min-w-0 bg-transparent text-white tnum font-semibold outline-none",
+                isPro ? "text-xs" : "text-[16px]"
+              )}
             />
             <button
               type="button"
               onClick={() => setPrice(bestPrice?.toFixed(p.priceDecimals) ?? "")}
-              className="px-2 py-1 text-[11px] rounded-md bg-white/10 hover:bg-white/15 text-secondary hover:text-white transition-colors"
+              className="px-1.5 py-0.5 text-[10px] rounded bg-white/10 hover:bg-white/15 text-secondary hover:text-white transition-colors"
             >
               Mid
             </button>
           </div>
         </div>
       ) : (
-        <div className="h-[52px] px-4 rounded-xl flex items-center justify-between bg-surface/50 border border-white/5 text-[14px] text-secondary">
+        <div className={cn(
+          "px-3 rounded-xl flex items-center justify-between bg-surface/50 border border-white/5 text-secondary",
+          isPro ? "h-9 text-xs" : "h-[52px] text-[14px]"
+        )}>
           <span>Market Price</span>
           <span className="text-white tnum font-medium">Best Available execution</span>
         </div>
       )}
 
       {/* Amount Field */}
-      <div className="space-y-1.5">
-        <label className="text-[11px] uppercase tracking-wider text-tertiary font-semibold px-0.5 inline-flex items-center gap-1.5">
-          <CoinIcon asset={baseAsset} size={12} />
+      <div className={isPro ? "space-y-1" : "space-y-1.5"}>
+        <label className="text-[10px] uppercase tracking-wider text-tertiary font-semibold px-0.5 inline-flex items-center gap-1.5">
+          <CoinIcon asset={baseAsset} size={11} />
           <span>Amount ({baseAsset})</span>
         </label>
-        <div className="h-[52px] px-3.5 rounded-xl flex items-center gap-2 bg-surface/80 border border-[var(--color-glass-border)] focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(163,230,53,0.15)] transition-all">
+        <div className={cn(
+          "px-3 rounded-xl flex items-center gap-2 bg-surface/80 border border-[var(--color-glass-border)] focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(163,230,53,0.15)] transition-all",
+          isPro ? "h-9" : "h-[52px]"
+        )}>
           <input
             type="number"
             inputMode="decimal"
@@ -219,23 +237,29 @@ export function OrderTicket({
             onChange={(e) => setQty(e.target.value)}
             placeholder="0.00"
             step={p.minQty}
-            className="flex-1 min-w-0 bg-transparent text-[16px] text-white tnum font-semibold outline-none"
+            className={cn(
+              "flex-1 min-w-0 bg-transparent text-white tnum font-semibold outline-none",
+              isPro ? "text-xs" : "text-[16px]"
+            )}
           />
           <span className="text-secondary text-xs font-semibold inline-flex items-center gap-1">
-            <CoinIcon asset={baseAsset} size={14} />
+            <CoinIcon asset={baseAsset} size={13} />
             <span>{baseAsset}</span>
           </span>
         </div>
       </div>
 
       {/* Percentage Quick Picks */}
-      <div className="grid grid-cols-4 gap-1.5">
+      <div className="grid grid-cols-4 gap-1">
         {PERCENTS.map((pct) => (
           <button
             key={pct}
             type="button"
             onClick={() => setPercent(pct)}
-            className="h-8 rounded-lg text-[12px] font-medium bg-surface/70 hover:bg-white/10 border border-white/5 text-secondary hover:text-white tnum transition-colors"
+            className={cn(
+              "rounded-lg font-medium bg-surface/70 hover:bg-white/10 border border-white/5 text-secondary hover:text-white tnum transition-colors",
+              isPro ? "h-7 text-[11px]" : "h-8 text-[12px]"
+            )}
           >
             {pct}%
           </button>
@@ -243,7 +267,10 @@ export function OrderTicket({
       </div>
 
       {/* Order Summary & Fee Info */}
-      <div className="p-3.5 rounded-2xl bg-surface/40 border border-white/5 space-y-1.5 text-[12px]">
+      <div className={cn(
+        "rounded-xl bg-surface/40 border border-white/5",
+        isPro ? "p-2.5 space-y-1 text-[11px]" : "p-3.5 space-y-1.5 text-[12px]"
+      )}>
         <div className="flex items-center justify-between">
           <span className="text-secondary">Estimated Total</span>
           <span className="text-white tnum font-semibold">
@@ -258,16 +285,16 @@ export function OrderTicket({
         </div>
       </div>
 
-      {/* Primary Action Button (always purple CTA as specified in principle 1 & section 6) */}
+      {/* Primary Action Button */}
       <Button
         variant="primary"
-        size="lg"
+        size={isPro ? "md" : "lg"}
         fullWidth
         pill
-        icon={<CoinIcon asset={baseAsset} size={18} />}
+        icon={<CoinIcon asset={baseAsset} size={isPro ? 16 : 18} />}
         loading={submitting}
         onClick={submit}
-        className="mt-1"
+        className={isPro ? "h-9 md:h-10 text-xs font-bold" : "mt-1"}
       >
         {isBuy ? `Buy ${baseAsset}` : `Sell ${baseAsset}`}
       </Button>

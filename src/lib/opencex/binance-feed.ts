@@ -78,6 +78,35 @@ export function fromBinanceSymbol(symbol: string): string {
   return symbol;
 }
 
+const BINANCE_REST_BASE = "https://api.binance.com/api/v3";
+
+/**
+ * Fetch recent 1m candles (oldest → newest). Two pages of 1000 ≈ 33h of history so the
+ * 1h/4h views have something to show. Throws on network/HTTP errors — callers fall back to live-only.
+ */
+export async function fetchKlineHistory(
+  pair: string,
+  pages = 2,
+  signal?: AbortSignal,
+): Promise<Array<{ openTime: number; open: number; high: number; low: number; close: number; volume: number }>> {
+  const symbol = toBinanceSymbol(pair).toUpperCase();
+  let endTime: number | undefined;
+  let all: Array<{ openTime: number; open: number; high: number; low: number; close: number; volume: number }> = [];
+  for (let i = 0; i < pages; i++) {
+    const url = `${BINANCE_REST_BASE}/klines?symbol=${symbol}&interval=1m&limit=1000${endTime ? `&endTime=${endTime}` : ""}`;
+    const res = await fetch(url, { signal });
+    if (!res.ok) throw new Error(`Binance klines HTTP ${res.status}`);
+    const rows = (await res.json()) as Array<[number, string, string, string, string, string]>;
+    if (!rows.length) break;
+    const page = rows.map((r) => ({
+      openTime: r[0], open: parseFloat(r[1]), high: parseFloat(r[2]), low: parseFloat(r[3]), close: parseFloat(r[4]), volume: parseFloat(r[5]),
+    }));
+    all = page.concat(all);
+    endTime = page[0].openTime - 1;
+  }
+  return all;
+}
+
 export class BinanceFeed {
   private ws: WebSocket | null = null;
   private pair: string;

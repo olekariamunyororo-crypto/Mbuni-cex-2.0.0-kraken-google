@@ -293,14 +293,14 @@ export class MatchingEngine {
     let bidTotal = 0;
     let askTotal = 0;
 
-    const bidPrices = Array.from(this.bids.keys()).sort((a, b) => b - a).slice(0, 20);
+    const bidPrices = Array.from(this.bids.keys()).sort((a, b) => b - a).slice(0, 30);
     for (const p of bidPrices) {
       const queue = this.bids.get(p)!;
       const qty = queue.reduce((s, o) => s + o.qty, 0);
       bidTotal += qty;
       bids.push({ price: p, qty: round(qty, this.pair.baseDecimals), total: round(bidTotal, this.pair.baseDecimals), orderCount: queue.length });
     }
-    const askPrices = Array.from(this.asks.keys()).sort((a, b) => a - b).slice(0, 20);
+    const askPrices = Array.from(this.asks.keys()).sort((a, b) => a - b).slice(0, 30);
     for (const p of askPrices) {
       const queue = this.asks.get(p)!;
       const qty = queue.reduce((s, o) => s + o.qty, 0);
@@ -355,7 +355,7 @@ export class MatchingEngine {
   }
 
   // Seed the book with random market-makers (used to bootstrap a lively order book)
-  seedBook(midPrice: number, levels = 12, qtyEach = 0.5) {
+  seedBook(midPrice: number, levels = 25, qtyEach = 0.5) {
     for (let i = 1; i <= levels; i++) {
       const bidPrice = round(midPrice - i * this.pair.tickSize, this.pair.priceDecimals);
       const askPrice = round(midPrice + i * this.pair.tickSize, this.pair.priceDecimals);

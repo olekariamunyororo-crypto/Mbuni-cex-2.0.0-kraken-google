@@ -112,7 +112,7 @@ export const SAMPLE_USERS: User[] = [
 export function generateKlines(pair: string, basePrice: number, count = 360): Kline[] {
   const klines: Kline[] = [];
   let price = basePrice * 0.97;
-  const now = Date.now();
+  const now = Math.floor(Date.now() / 60_000) * 60_000; // align to the minute, like exchange candles
   const drift = (Math.random() - 0.4) * 0.0008;
   for (let i = count - 1; i >= 0; i--) {
     const openTime = now - i * 60_000;

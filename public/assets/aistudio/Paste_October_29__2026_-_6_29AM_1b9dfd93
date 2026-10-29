@@ -1,0 +1,1643 @@
+#!/usr/bin/env bash
+# Mbuni CEX — candle chart fixes. Run from the project root: bash apply-candle-fix.sh
+# NOTE: store.ts / use-binance-feed.ts here include the earlier accounting + feed fixes (apply-mbuni-fixes.sh),
+# so this script is safe to run on top of them (or on its own).
+set -euo pipefail
+[ -f package.json ] && [ -d src/components/opencex ] || { echo "Run from the project root"; exit 1; }
+w(){ mkdir -p "$(dirname "$1")"; [ -f "$1" ] && [ ! -f "$1.orig" ] && cp "$1" "$1.orig"; cat > "$1"; echo "  wrote $1"; }
+
+w 'src/lib/opencex/seed.ts' <<'MBUNI_CANDLE_EOF'
+// Mbuni CEX — Seed data: trading pairs, balances, fee schedules, klines, deposits, etc.
+
+import type {
+  Balance,
+  Deposit,
+  FeeSchedule,
+  Kline,
+  TradingPair,
+  User,
+  WhitelistedAddress,
+  Withdrawal,
+} from "./types";
+
+export const TRADING_PAIRS: TradingPair[] = [
+  { symbol: "BTC/USDT", base: "BTC", quote: "USDT", baseDecimals: 8, quoteDecimals: 2, priceDecimals: 2, minQty: 0.0001, tickSize: 0.1, status: "ACTIVE" },
+  { symbol: "ETH/USDT", base: "ETH", quote: "USDT", baseDecimals: 6, quoteDecimals: 2, priceDecimals: 2, minQty: 0.001, tickSize: 0.01, status: "ACTIVE" },
+  { symbol: "SOL/USDT", base: "SOL", quote: "USDT", baseDecimals: 2, quoteDecimals: 2, priceDecimals: 3, minQty: 0.01, tickSize: 0.001, status: "ACTIVE" },
+  { symbol: "BNB/USDT", base: "BNB", quote: "USDT", baseDecimals: 3, quoteDecimals: 2, priceDecimals: 2, minQty: 0.01, tickSize: 0.01, status: "ACTIVE" },
+  { symbol: "XRP/USDT", base: "XRP", quote: "USDT", baseDecimals: 1, quoteDecimals: 2, priceDecimals: 4, minQty: 1, tickSize: 0.0001, status: "ACTIVE" },
+  { symbol: "ARB/USDT", base: "ARB", quote: "USDT", baseDecimals: 2, quoteDecimals: 2, priceDecimals: 4, minQty: 1, tickSize: 0.0001, status: "ACTIVE" },
+  { symbol: "OP/USDT", base: "OP", quote: "USDT", baseDecimals: 2, quoteDecimals: 2, priceDecimals: 4, minQty: 1, tickSize: 0.0001, status: "ACTIVE" },
+  { symbol: "DOGE/USDT", base: "DOGE", quote: "USDT", baseDecimals: 0, quoteDecimals: 2, priceDecimals: 5, minQty: 1, tickSize: 0.00001, status: "ACTIVE" },
+  { symbol: "MATIC/USDT", base: "MATIC", quote: "USDT", baseDecimals: 2, quoteDecimals: 2, priceDecimals: 4, minQty: 1, tickSize: 0.0001, status: "ACTIVE" },
+  { symbol: "AVAX/USDT", base: "AVAX", quote: "USDT", baseDecimals: 2, quoteDecimals: 2, priceDecimals: 3, minQty: 0.1, tickSize: 0.001, status: "ACTIVE" },
+  { symbol: "LINK/USDT", base: "LINK", quote: "USDT", baseDecimals: 2, quoteDecimals: 2, priceDecimals: 3, minQty: 0.1, tickSize: 0.001, status: "ACTIVE" },
+  { symbol: "TON/USDT", base: "TON", quote: "USDT", baseDecimals: 2, quoteDecimals: 2, priceDecimals: 3, minQty: 0.1, tickSize: 0.001, status: "ACTIVE" },
+];
+
+export const INITIAL_PRICES: Record<string, number> = {
+  "BTC/USDT": 67250.5,
+  "ETH/USDT": 3245.8,
+  "SOL/USDT": 178.42,
+  "BNB/USDT": 605.2,
+  "XRP/USDT": 0.5234,
+  "ARB/USDT": 0.7821,
+  "OP/USDT": 1.953,
+  "DOGE/USDT": 0.12134,
+  "MATIC/USDT": 0.4821,
+  "AVAX/USDT": 28.74,
+  "LINK/USDT": 14.32,
+  "TON/USDT": 5.21,
+};
+
+export const ASSET_METADATA: Record<string, { name: string; color: string; chains: string[] }> = {
+  BTC: { name: "Bitcoin", color: "#f7931a", chains: ["Bitcoin", "BSC", "Arbitrum"] },
+  ETH: { name: "Ethereum", color: "#627eea", chains: ["Ethereum", "Arbitrum", "Optimism", "BSC"] },
+  SOL: { name: "Solana", color: "#14f195", chains: ["Solana"] },
+  BNB: { name: "BNB", color: "#f3ba2f", chains: ["BSC"] },
+  XRP: { name: "Ripple", color: "#23292f", chains: ["XRPL"] },
+  ARB: { name: "Arbitrum", color: "#28a0f0", chains: ["Arbitrum"] },
+  OP: { name: "Optimism", color: "#ff0420", chains: ["Optimism"] },
+  DOGE: { name: "Dogecoin", color: "#c2a633", chains: ["Dogecoin", "Ethereum"] },
+  MATIC: { name: "Polygon", color: "#8247e5", chains: ["Polygon", "Ethereum"] },
+  AVAX: { name: "Avalanche", color: "#e84142", chains: ["Avalanche"] },
+  LINK: { name: "Chainlink", color: "#2a5ada", chains: ["Ethereum", "Arbitrum"] },
+  TON: { name: "Toncoin", color: "#0098ea", chains: ["TON"] },
+  USDT: { name: "Tether", color: "#26a17b", chains: ["Ethereum", "Tron", "BSC", "Arbitrum", "Solana"] },
+};
+
+export const INITIAL_BALANCES: Balance[] = [
+  { asset: "USDT", free: 245680.42, locked: 4200.0, usdValue: 245680.42 },
+  { asset: "BTC", free: 3.4521, locked: 0.05, usdValue: 3.4521 * 67250.5 },
+  { asset: "ETH", free: 42.18, locked: 1.2, usdValue: 42.18 * 3245.8 },
+  { asset: "SOL", free: 380.5, locked: 0, usdValue: 380.5 * 178.42 },
+  { asset: "ARB", free: 12500, locked: 0, usdValue: 12500 * 0.7821 },
+  { asset: "OP", free: 8200, locked: 0, usdValue: 8200 * 1.953 },
+  { asset: "LINK", free: 1200, locked: 0, usdValue: 1200 * 14.32 },
+  { asset: "TON", free: 5000, locked: 0, usdValue: 5000 * 5.21 },
+];
+
+export const FEE_SCHEDULES: FeeSchedule[] = [
+  { tier: 0, label: "Starter", volumeUSD: 0, makerFee: 10, takerFee: 18 },
+  { tier: 1, label: "Bronze", volumeUSD: 50_000, makerFee: 8, takerFee: 15 },
+  { tier: 2, label: "Silver", volumeUSD: 250_000, makerFee: 6, takerFee: 12 },
+  { tier: 3, label: "Gold", volumeUSD: 1_000_000, makerFee: 4, takerFee: 9 },
+  { tier: 4, label: "Platinum", volumeUSD: 5_000_000, makerFee: 2, takerFee: 6 },
+  { tier: 5, label: "Institutional", volumeUSD: 25_000_000, makerFee: 0, takerFee: 4 },
+];
+
+export const WHITELISTED_ADDRESSES: WhitelistedAddress[] = [
+  { id: "wa_1", asset: "BTC", chain: "Bitcoin", address: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh", label: "Cold Storage — Ledger", addedAt: Date.now() - 86400000 * 30, timeLockHours: 24 },
+  { id: "wa_2", asset: "ETH", chain: "Ethereum", address: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1", label: "Hardware Wallet", addedAt: Date.now() - 86400000 * 14, timeLockHours: 24 },
+  { id: "wa_3", asset: "USDT", chain: "Tron", address: "TLa2f6VPqDgRE67v1736s7bCe8PRhzdnpg", label: "Exchange Sub-account", addedAt: Date.now() - 86400000 * 7, timeLockHours: 48 },
+  { id: "wa_4", asset: "SOL", chain: "Solana", address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", label: "Phantom — Mobile", addedAt: Date.now() - 86400000 * 3, timeLockHours: 24 },
+];
+
+export const DEPOSITS: Deposit[] = [
+  { id: "d_1", asset: "BTC", chain: "Bitcoin", amount: 0.4521, txHash: "f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16", address: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh", confirmations: 3, requiredConfirmations: 3, status: "CREDITED", timestamp: Date.now() - 3600000 * 5 },
+  { id: "d_2", asset: "USDT", chain: "Tron", amount: 12500, txHash: "3e5a2c4b8d9f1e0a6c7b2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a", address: "TLa2f6VPqDgRE67v1736s7bCe8PRhzdnpg", confirmations: 19, requiredConfirmations: 20, status: "PENDING", timestamp: Date.now() - 600000 },
+  { id: "d_3", asset: "ETH", chain: "Arbitrum", amount: 2.18, txHash: "0x9abc...8def", address: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1", confirmations: 1, requiredConfirmations: 12, status: "PENDING", timestamp: Date.now() - 120000 },
+  { id: "d_4", asset: "SOL", chain: "Solana", amount: 80.5, txHash: "5xK9...AsU", address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", confirmations: 32, requiredConfirmations: 32, status: "CREDITED", timestamp: Date.now() - 86400000 },
+  { id: "d_5", asset: "USDT", chain: "Ethereum", amount: 45000, txHash: "0xa1b2...c3d4", address: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1", confirmations: 15, requiredConfirmations: 12, status: "CREDITED", timestamp: Date.now() - 86400000 * 3 },
+];
+
+export const WITHDRAWALS: Withdrawal[] = [
+  { id: "w_1", asset: "ETH", chain: "Ethereum", amount: 5.0, fee: 0.002, address: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1", txHash: "0xfa1c...92be", status: "COMPLETED", timestamp: Date.now() - 3600000 * 12 },
+  { id: "w_2", asset: "USDT", chain: "Tron", amount: 18000, fee: 1, address: "TLa2f6VPqDgRE67v1736s7bCe8PRhzdnpg", txHash: null, status: "APPROVED", timestamp: Date.now() - 1800000 },
+  { id: "w_3", asset: "BTC", chain: "Bitcoin", amount: 0.25, fee: 0.0001, address: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh", txHash: null, status: "PENDING", timestamp: Date.now() - 600000 },
+  { id: "w_4", asset: "SOL", chain: "Solana", amount: 50, fee: 0.01, address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", txHash: "5xK9...z8As", status: "COMPLETED", timestamp: Date.now() - 86400000 * 2 },
+];
+
+export const SAMPLE_USERS: User[] = [
+  { id: "u_1", email: "alice@mbuni.cex", kycStatus: "VERIFIED", tier: 3, createdAt: Date.now() - 86400000 * 120, twoFA: true, passkey: true },
+  { id: "u_2", email: "bobby.trader@example.com", kycStatus: "VERIFIED", tier: 2, createdAt: Date.now() - 86400000 * 45, twoFA: true, passkey: false },
+  { id: "u_3", email: "carol.investor@example.com", kycStatus: "PENDING", tier: 0, createdAt: Date.now() - 86400000 * 3, twoFA: false, passkey: false },
+  { id: "u_4", email: "david.whale@example.com", kycStatus: "VERIFIED", tier: 5, createdAt: Date.now() - 86400000 * 365, twoFA: true, passkey: true },
+  { id: "u_5", email: "erin.newbie@example.com", kycStatus: "NONE", tier: 0, createdAt: Date.now() - 3600000 * 6, twoFA: false, passkey: false },
+  { id: "u_6", email: "frank.botmaker@example.com", kycStatus: "VERIFIED", tier: 4, createdAt: Date.now() - 86400000 * 210, twoFA: true, passkey: false },
+];
+
+// Generate ~6h of 1m klines for charting
+export function generateKlines(pair: string, basePrice: number, count = 360): Kline[] {
+  const klines: Kline[] = [];
+  let price = basePrice * 0.97;
+  const now = Math.floor(Date.now() / 60_000) * 60_000; // align to the minute, like exchange candles
+  const drift = (Math.random() - 0.4) * 0.0008;
+  for (let i = count - 1; i >= 0; i--) {
+    const openTime = now - i * 60_000;
+    const open = price;
+    const vol = 0.0005 + Math.random() * 0.0015;
+    const change = (Math.random() - 0.5) * vol + drift;
+    const close = Math.max(0.01, open * (1 + change));
+    const high = Math.max(open, close) * (1 + Math.random() * 0.0015);
+    const low = Math.min(open, close) * (1 - Math.random() * 0.0015);
+    const volume = (Math.random() * 50 + 10) * (basePrice > 1000 ? 0.5 : 1);
+    klines.push({
+      openTime,
+      open: round(open, 4),
+      high: round(high, 4),
+      low: round(low, 4),
+      close: round(close, 4),
+      volume: round(volume, 4),
+    });
+    price = close;
+  }
+  return klines;
+}
+
+function round(n: number, d: number) {
+  const f = Math.pow(10, d);
+  return Math.round(n * f) / f;
+}
+
+export const CHAINS = [
+  { id: "bitcoin", name: "Bitcoin", confirmations: 3, withdrawalFeeUSD: 8.5 },
+  { id: "ethereum", name: "Ethereum", confirmations: 12, withdrawalFeeUSD: 4.2 },
+  { id: "bsc", name: "BNB Smart Chain", confirmations: 15, withdrawalFeeUSD: 0.4 },
+  { id: "arbitrum", name: "Arbitrum One", confirmations: 6, withdrawalFeeUSD: 0.5 },
+  { id: "optimism", name: "Optimism", confirmations: 6, withdrawalFeeUSD: 0.4 },
+  { id: "polygon", name: "Polygon PoS", confirmations: 8, withdrawalFeeUSD: 0.3 },
+  { id: "solana", name: "Solana", confirmations: 32, withdrawalFeeUSD: 0.05 },
+  { id: "tron", name: "Tron", confirmations: 20, withdrawalFeeUSD: 1.5 },
+  { id: "ton", name: "TON", confirmations: 30, withdrawalFeeUSD: 0.1 },
+  { id: "xrpl", name: "XRPL", confirmations: 1, withdrawalFeeUSD: 0.2 },
+];
+MBUNI_CANDLE_EOF
+w 'src/lib/opencex/binance-feed.ts' <<'MBUNI_CANDLE_EOF'
+// =============================================================================
+// Mbuni CEX — Binance real-time market data feed
+//
+// Connects to Binance's public WebSocket API (no API key needed, no CORS
+// issues for WebSocket). Streams real trades, order book depth, klines, and
+// 24h tickers for the active trading pair.
+//
+// The matching engine stays in the browser for user orders — but the DISPLAYED
+// order book, trade tape, chart, and ticker are now real Binance data.
+//
+// Binance WebSocket docs:
+//   https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
+// =============================================================================
+
+export interface BinanceTrade {
+  pair: string;
+  price: number;
+  qty: number;
+  side: "BUY" | "SELL"; // aggressor side: m=true means seller is maker → buyer is aggressor → BUY
+  timestamp: number;
+}
+
+export interface BinanceDepth {
+  pair: string;
+  bids: Array<[number, number]>; // [price, qty]
+  asks: Array<[number, number]>;
+  lastUpdateId: number;
+}
+
+export interface BinanceKline {
+  pair: string;
+  openTime: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  isClosed: boolean;
+}
+
+export interface BinanceTicker {
+  pair: string;
+  lastPrice: number;
+  priceChangePct: number;
+  high: number;
+  low: number;
+  volume: number;
+  quoteVolume: number;
+}
+
+export interface BinanceFeedCallbacks {
+  onTrade?: (t: BinanceTrade) => void;
+  onDepth?: (d: BinanceDepth) => void;
+  onKline?: (k: BinanceKline) => void;
+  onTicker?: (t: BinanceTicker) => void;
+  onConnect?: () => void;
+  onDisconnect?: (reason: string) => void;
+  onError?: (err: Event) => void;
+}
+
+const BINANCE_WS_BASE = "wss://stream.binance.com:9443/stream";
+
+/**
+ * Map a Mbuni pair symbol (BTC/USDT) to a Binance stream symbol (btcusdt).
+ */
+export function toBinanceSymbol(pair: string): string {
+  return pair.replace("/", "").toLowerCase();
+}
+
+/**
+ * Map a Binance trade stream symbol back to a Mbuni pair (BTCUSDT → BTC/USDT).
+ */
+export function fromBinanceSymbol(symbol: string): string {
+  // Most pairs are /USDT
+  if (symbol.endsWith("USDT")) {
+    return symbol.slice(0, -4) + "/USDT";
+  }
+  return symbol;
+}
+
+const BINANCE_REST_BASE = "https://api.binance.com/api/v3";
+
+/**
+ * Fetch recent 1m candles (oldest → newest). Two pages of 1000 ≈ 33h of history so the
+ * 1h/4h views have something to show. Throws on network/HTTP errors — callers fall back to live-only.
+ */
+export async function fetchKlineHistory(
+  pair: string,
+  pages = 2,
+  signal?: AbortSignal,
+): Promise<Array<{ openTime: number; open: number; high: number; low: number; close: number; volume: number }>> {
+  const symbol = toBinanceSymbol(pair).toUpperCase();
+  let endTime: number | undefined;
+  let all: Array<{ openTime: number; open: number; high: number; low: number; close: number; volume: number }> = [];
+  for (let i = 0; i < pages; i++) {
+    const url = `${BINANCE_REST_BASE}/klines?symbol=${symbol}&interval=1m&limit=1000${endTime ? `&endTime=${endTime}` : ""}`;
+    const res = await fetch(url, { signal });
+    if (!res.ok) throw new Error(`Binance klines HTTP ${res.status}`);
+    const rows = (await res.json()) as Array<[number, string, string, string, string, string]>;
+    if (!rows.length) break;
+    const page = rows.map((r) => ({
+      openTime: r[0], open: parseFloat(r[1]), high: parseFloat(r[2]), low: parseFloat(r[3]), close: parseFloat(r[4]), volume: parseFloat(r[5]),
+    }));
+    all = page.concat(all);
+    endTime = page[0].openTime - 1;
+  }
+  return all;
+}
+
+export class BinanceFeed {
+  private ws: WebSocket | null = null;
+  private pair: string;
+  private callbacks: BinanceFeedCallbacks;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private closed = false;
+
+  constructor(pair: string, callbacks: BinanceFeedCallbacks) {
+    this.pair = pair;
+    this.callbacks = callbacks;
+  }
+
+  /**
+   * Connect to Binance's combined WebSocket stream for the active pair.
+   * Streams: trade, depth20@100ms, kline_1m, ticker
+   */
+  connect() {
+    if (this.closed) return;
+    const symbol = toBinanceSymbol(this.pair);
+    const streams = [
+      `${symbol}@trade`,
+      `${symbol}@depth20@100ms`,
+      `${symbol}@kline_1m`,
+      `${symbol}@ticker`,
+    ].join("/");
+
+    const url = `${BINANCE_WS_BASE}?streams=${streams}`;
+
+    try {
+      this.ws = new WebSocket(url);
+    } catch (err) {
+      this.callbacks.onError?.(err as Event);
+      this.scheduleReconnect();
+      return;
+    }
+
+    this.ws.onopen = () => {
+      this.reconnectAttempts = 0;
+      this.callbacks.onConnect?.();
+    };
+
+    this.ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (!msg.stream || !msg.data) return;
+        this.handleMessage(msg.stream, msg.data);
+      } catch {
+        // Ignore malformed messages
+      }
+    };
+
+    this.ws.onerror = (err) => {
+      this.callbacks.onError?.(err);
+    };
+
+    this.ws.onclose = (event) => {
+      this.callbacks.onDisconnect?.(event.reason || "connection closed");
+      if (!this.closed) {
+        this.scheduleReconnect();
+      }
+    };
+  }
+
+  private handleMessage(stream: string, data: any) {
+    // Trade stream: { e: "trade", p: "0.001", q: "100", T: 123456, m: true }
+    if (stream.includes("@trade")) {
+      const trade: BinanceTrade = {
+        pair: this.pair,
+        price: parseFloat(data.p),
+        qty: parseFloat(data.q),
+        // m = isBuyerMaker. If true, the buyer is the maker → seller is aggressor → SELL
+        side: data.m ? "SELL" : "BUY",
+        timestamp: data.T,
+      };
+      this.callbacks.onTrade?.(trade);
+      return;
+    }
+
+    // Partial book depth stream: { bids: [[p,q]], asks: [[p,q]] }
+    if (stream.includes("@depth")) {
+      const depth: BinanceDepth = {
+        pair: this.pair,
+        bids: (data.bids || []).map((b: string[]) => [parseFloat(b[0]), parseFloat(b[1])]),
+        asks: (data.asks || []).map((a: string[]) => [parseFloat(a[0]), parseFloat(a[1])]),
+        lastUpdateId: data.lastUpdateId || 0,
+      };
+      this.callbacks.onDepth?.(depth);
+      return;
+    }
+
+    // Kline stream: { k: { t, o, h, l, c, v, x } }
+    if (stream.includes("@kline")) {
+      const k = data.k;
+      if (!k) return;
+      const kline: BinanceKline = {
+        pair: this.pair,
+        openTime: k.t,
+        open: parseFloat(k.o),
+        high: parseFloat(k.h),
+        low: parseFloat(k.l),
+        close: parseFloat(k.c),
+        volume: parseFloat(k.v),
+        isClosed: k.x,
+      };
+      this.callbacks.onKline?.(kline);
+      return;
+    }
+
+    // 24h ticker: { c: lastPrice, P: priceChangePct, h: high, l: low, v: volume, q: quoteVolume }
+    if (stream.includes("@ticker")) {
+      const ticker: BinanceTicker = {
+        pair: this.pair,
+        lastPrice: parseFloat(data.c),
+        priceChangePct: parseFloat(data.P),
+        high: parseFloat(data.h),
+        low: parseFloat(data.l),
+        volume: parseFloat(data.v),
+        quoteVolume: parseFloat(data.q),
+      };
+      this.callbacks.onTicker?.(ticker);
+      return;
+    }
+  }
+
+  private scheduleReconnect() {
+    if (this.closed) return;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    this.reconnectAttempts++;
+
+    this.reconnectTimer = setTimeout(() => {
+      if (!this.closed) {
+        this.connect();
+      }
+    }, delay);
+  }
+
+  /**
+   * Switch to a different trading pair. Closes the current connection
+   * and opens a new one for the new pair.
+   */
+  switchPair(newPair: string) {
+    this.pair = newPair;
+    this.closeWebSocket();
+    this.reconnectAttempts = 0;
+    this.connect();
+  }
+
+  private closeWebSocket() {
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        this.ws.close();
+      }
+      this.ws = null;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  /**
+   * Permanently close the feed. No reconnection will be attempted.
+   */
+  close() {
+    this.closed = true;
+    this.closeWebSocket();
+  }
+}
+MBUNI_CANDLE_EOF
+w 'src/lib/opencex/store.ts' <<'MBUNI_CANDLE_EOF'
+// Mbuni CEX — Central client store
+//
+// Ties together:
+//  - Per-pair matching engines (Rust engine — TS reference impl)
+//  - User balances (with reservation / release on order placement)
+//  - Live trade tape
+//  - Kline history + 24h ticker
+//  - NATS-style event log (spec §8)
+//
+// All updates flow through here so every view stays consistent.
+
+"use client";
+
+import { create } from "zustand";
+import { MatchingEngine } from "./engine";
+import {
+  CHAINS,
+  DEPOSITS,
+  FEE_SCHEDULES,
+  INITIAL_BALANCES,
+  INITIAL_PRICES,
+  SAMPLE_USERS,
+  TRADING_PAIRS,
+  WHITELISTED_ADDRESSES,
+  WITHDRAWALS,
+  generateKlines,
+} from "./seed";
+import type {
+  Balance,
+  Deposit,
+  FeeSchedule,
+  Kline,
+  Order,
+  OrderBookSnapshot,
+  Side,
+  SystemEvent,
+  Trade,
+  Ticker24h,
+  User,
+  WhitelistedAddress,
+  Withdrawal,
+} from "./types";
+
+const CURRENT_USER_ID = "u_self";
+
+interface MbuniCEXState {
+  // Static / reference data
+  pairs: typeof TRADING_PAIRS;
+  feeSchedules: FeeSchedule[];
+  chains: typeof CHAINS;
+  users: User[];
+
+  // Live data
+  activePair: string;
+  balances: Balance[];
+  orders: Order[]; // current user's orders
+  trades: Trade[]; // global trade tape (most recent)
+  tickers: Record<string, Ticker24h>;
+  books: Record<string, OrderBookSnapshot>;
+  klines: Record<string, Kline[]>;
+  deposits: Deposit[];
+  withdrawals: Withdrawal[];
+  whitelist: WhitelistedAddress[];
+  events: SystemEvent[];
+
+  // Internal engines (not serializable, kept outside react tree)
+  engines: Record<string, MatchingEngine>;
+  engineInterval: ReturnType<typeof setInterval> | null;
+  started: boolean;
+
+  // Live data (Binance WebSocket feed)
+  liveMode: boolean;       // true = real Binance data, false = simulated bots
+  feedConnected: boolean;  // WebSocket connection status
+  feed: unknown;           // BinanceFeed instance (not serializable)
+
+  // Actions
+  init: () => void;
+  setActivePair: (symbol: string) => void;
+  setLiveMode: (enabled: boolean) => void;
+  setFeedConnected: (connected: boolean) => void;
+  setFeed: (feed: unknown) => void;
+  updateBookFromBinance: (pair: string, bids: Array<[number, number]>, asks: Array<[number, number]>) => void;
+  updateTradeFromBinance: (pair: string, price: number, qty: number, side: "BUY" | "SELL", timestamp: number) => void;
+  updateTickerFromBinance: (pair: string, lastPrice: number, priceChangePct: number, high: number, low: number, volume: number, quoteVolume: number) => void;
+  setKlineHistory: (pair: string, klines: Kline[]) => void;
+  updateKlineFromBinance: (pair: string, openTime: number, open: number, high: number, low: number, close: number, volume: number, isClosed: boolean) => void;
+  placeOrder: (params: { pair: string; side: Side; type: Order["type"]; price: number | null; qty: number }) => { ok: boolean; reason?: string; order?: Order };
+  cancelOrder: (orderId: string) => void;
+  requestWithdrawal: (params: { asset: string; chain: string; amount: number; address: string }) => { ok: boolean; reason?: string };
+  addWhitelist: (params: { asset: string; chain: string; address: string; label: string }) => void;
+  pushEvent: (subject: SystemEvent["subject"], payload: unknown) => void;
+}
+
+const MAX_KLINES = 2000;
+/** Pairs whose candles come from Binance (history/live) rather than the simulator. */
+const liveKlinePairs = new Set<string>();
+
+function uid(prefix = "id") {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function findPair(pairs: typeof TRADING_PAIRS, symbol: string) {
+  return pairs.find((p) => p.symbol === symbol)!;
+}
+
+function buildTicker(pair: string, lastPrice: number, klines: Kline[]): Ticker24h {
+  const last24 = klines.slice(-1440); // 24h of 1m klines
+  const high = last24.length ? Math.max(...last24.map((k) => k.high)) : lastPrice;
+  const low = last24.length ? Math.min(...last24.map((k) => k.low)) : lastPrice;
+  const open = last24.length ? last24[0].open : lastPrice;
+  const volume = last24.reduce((s, k) => s + k.volume, 0);
+  const quoteVolume = last24.reduce((s, k) => s + k.volume * k.close, 0);
+  const priceChange = lastPrice - open;
+  return {
+    pair,
+    lastPrice,
+    priceChange,
+    priceChangePct: open ? (priceChange / open) * 100 : 0,
+    high,
+    low,
+    volume,
+    quoteVolume,
+  };
+}
+
+export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
+  pairs: TRADING_PAIRS,
+  feeSchedules: FEE_SCHEDULES,
+  chains: CHAINS,
+  users: SAMPLE_USERS,
+
+  activePair: "BTC/USDT",
+  balances: INITIAL_BALANCES,
+  orders: [],
+  trades: [],
+  tickers: {},
+  books: {},
+  klines: {},
+  deposits: DEPOSITS,
+  withdrawals: WITHDRAWALS,
+  whitelist: WHITELISTED_ADDRESSES,
+  events: [],
+
+  engines: {},
+  engineInterval: null,
+  started: false,
+
+  // Live data defaults
+  liveMode: false,
+  feedConnected: false,
+  feed: null,
+
+  init: () => {
+    if (get().started) return;
+    liveKlinePairs.clear(); // fresh session: candles start as simulated until the live feed supplies real ones
+    const engines: Record<string, MatchingEngine> = {};
+    const books: Record<string, OrderBookSnapshot> = {};
+    const tickers: Record<string, Ticker24h> = {};
+    const klines: Record<string, Kline[]> = {};
+
+    for (const pair of TRADING_PAIRS) {
+      const initial = INITIAL_PRICES[pair.symbol] ?? 100;
+      const eng = new MatchingEngine(pair, initial);
+      eng.seedBook(initial, 14, pair.base === "BTC" ? 0.4 : pair.base === "ETH" ? 1.2 : 50);
+      engines[pair.symbol] = eng;
+      books[pair.symbol] = eng.getSnapshot();
+      const ks = generateKlines(pair.symbol, initial, 360);
+      klines[pair.symbol] = ks;
+      tickers[pair.symbol] = buildTicker(pair.symbol, initial, ks);
+
+      eng.onTrade = (t) => {
+        // One store update per trade (was three), including settlement when one of the
+        // user's RESTING orders is the maker side of this trade.
+        set((s) => {
+          const next: Partial<MbuniCEXState> = { trades: [t, ...s.trades].slice(0, 100) };
+
+          const tk = s.tickers[pair.symbol];
+          if (tk) {
+            next.tickers = {
+              ...s.tickers,
+              [pair.symbol]: { ...tk, lastPrice: t.price, priceChange: t.price - tk.lastPrice + tk.priceChange },
+            };
+          }
+
+          const cur = s.klines[pair.symbol];
+          if (cur && cur.length > 0) {
+            const ks = cur.slice();
+            const bucket = Math.floor(t.timestamp / 60_000) * 60_000;
+            const prev = ks[ks.length - 1];
+            if (bucket > prev.openTime) {
+              // New minute: roll a fresh candle (previously the last candle absorbed every trade forever).
+              ks.push({ openTime: bucket, open: prev.close, high: Math.max(prev.close, t.price), low: Math.min(prev.close, t.price), close: t.price, volume: round(t.qty, 6) });
+              if (ks.length > MAX_KLINES) ks.splice(0, ks.length - MAX_KLINES);
+            } else {
+              const last = { ...prev };
+              last.close = t.price;
+              last.high = Math.max(last.high, t.price);
+              last.low = Math.min(last.low, t.price);
+              last.volume = round(last.volume + t.qty, 6);
+              ks[ks.length - 1] = last;
+            }
+            next.klines = { ...s.klines, [pair.symbol]: ks };
+          }
+
+          // Maker = the side opposite the aggressor.
+          const makerId = t.side === "BUY" ? t.sellerOrderId : t.buyerOrderId;
+          const mi = s.orders.findIndex((o) => o.id === makerId);
+          if (mi >= 0) {
+            const mo = s.orders[mi];
+            const makerIsBuy = mo.side === "BUY";
+            const filled = round(mo.filledQty + t.qty, pair.baseDecimals);
+            const remaining = Math.max(0, round(mo.remainingQty - t.qty, pair.baseDecimals));
+            const prevCost = (mo.avgFillPrice ?? 0) * mo.filledQty;
+            const orders = s.orders.slice();
+            orders[mi] = {
+              ...mo,
+              filledQty: filled,
+              remainingQty: remaining,
+              status: remaining <= 0 ? "FILLED" : "PARTIALLY_FILLED",
+              avgFillPrice: round((prevCost + t.qty * t.price) / filled, pair.priceDecimals),
+            };
+            next.orders = orders;
+            const cost = t.qty * t.price;
+            next.balances = s.balances.map((b) => {
+              if (makerIsBuy) {
+                if (b.asset === pair.quote) return { ...b, locked: round(Math.max(0, b.locked - cost), 8) };
+                if (b.asset === pair.base) return { ...b, free: round(b.free + t.qty, 8) };
+              } else {
+                if (b.asset === pair.base) return { ...b, locked: round(Math.max(0, b.locked - t.qty), 8) };
+                if (b.asset === pair.quote) return { ...b, free: round(b.free + cost, 8) };
+              }
+              return b;
+            });
+          }
+          return next;
+        });
+      };
+      eng.onBookUpdate = (snap) => {
+        set((s) => ({ books: { ...s.books, [pair.symbol]: snap } }));
+      };
+      eng.onOrderUpdate = (o) => {
+        if (o.userId === CURRENT_USER_ID) {
+          set((s) => {
+            const idx = s.orders.findIndex((x) => x.id === o.id);
+            const next = [...s.orders];
+            if (idx >= 0) {
+              next[idx] = { ...next[idx], ...o };
+            } else {
+              next.unshift(o);
+            }
+            return { orders: next };
+          });
+        }
+      };
+    }
+
+    // Seed some initial bot trades
+    const initialTrades: Trade[] = [];
+    for (let i = 0; i < 30; i++) {
+      const pair = TRADING_PAIRS[Math.floor(Math.random() * TRADING_PAIRS.length)];
+      const base = INITIAL_PRICES[pair.symbol];
+      const price = base * (1 + (Math.random() - 0.5) * 0.001);
+      initialTrades.push({
+        id: uid("t"),
+        pair: pair.symbol,
+        price: round(price, pair.priceDecimals),
+        qty: round(Math.random() * (pair.base === "BTC" ? 0.3 : pair.base === "ETH" ? 2 : 100), pair.baseDecimals),
+        side: Math.random() < 0.5 ? "BUY" : "SELL",
+        buyerOrderId: uid("o"),
+        sellerOrderId: uid("o"),
+        timestamp: Date.now() - (30 - i) * 1500,
+      });
+    }
+    initialTrades.sort((a, b) => b.timestamp - a.timestamp);
+
+    set({
+      engines,
+      books,
+      tickers,
+      klines,
+      started: true,
+      trades: initialTrades,
+    });
+
+    // Drive live activity on all engines (bots)
+    const interval = setInterval(() => {
+      const state = get();
+      // Each tick: nudge a few engines
+      const targets = Object.values(state.engines).slice(0, 6);
+      for (const eng of targets) {
+        eng.tick();
+      }
+      // Occasionally refresh tickers (simulate 24h calc)
+      // (handled in onTrade)
+    }, 1200);
+    set({ engineInterval: interval });
+  },
+
+  setActivePair: (symbol) => set({ activePair: symbol }),
+
+  // ----- Live data (Binance WebSocket) -----
+
+  setLiveMode: (enabled) => {
+    const state = get();
+    if (enabled === state.liveMode) return;
+    set({ liveMode: enabled });
+    if (!enabled) liveKlinePairs.clear();
+    // When entering live mode, stop the simulated bot interval
+    // (real data will drive the display instead)
+    if (enabled && state.engineInterval) {
+      clearInterval(state.engineInterval);
+      set({ engineInterval: null });
+    }
+    // When leaving live mode, restart the bot interval
+    if (!enabled && !state.engineInterval && state.started) {
+      const interval = setInterval(() => {
+        const s = get();
+        const targets = Object.values(s.engines).slice(0, 6);
+        for (const eng of targets) {
+          eng.tick();
+        }
+      }, 1200);
+      set({ engineInterval: interval });
+    }
+  },
+
+  setFeedConnected: (connected) => set({ feedConnected: connected }),
+  setFeed: (feed) => set({ feed }),
+
+  updateBookFromBinance: (pair, bids, asks) => {
+    const state = get();
+    const p = findPair(state.pairs, pair);
+    // Convert Binance depth to OrderBookSnapshot format
+    const bookBids = bids.slice(0, 20).map(([price, qty]) => ({ price, qty, total: 0, orderCount: 1 }));
+    const bookAsks = asks.slice(0, 20).map(([price, qty]) => ({ price, qty, total: 0, orderCount: 1 }));
+    // Compute cumulative totals
+    let bidTotal = 0;
+    for (const b of bookBids) { bidTotal += b.qty; b.total = round(bidTotal, p.baseDecimals); }
+    let askTotal = 0;
+    for (const a of bookAsks) { askTotal += a.qty; a.total = round(askTotal, p.baseDecimals); }
+
+    const bestBid = bookBids.length ? bookBids[0].price : 0;
+    const bestAsk = bookAsks.length ? bookAsks[0].price : 0;
+    const spread = bestBid && bestAsk ? round(bestAsk - bestBid, p.priceDecimals) : 0;
+    const midPrice = bestBid && bestAsk ? round((bestBid + bestAsk) / 2, p.priceDecimals) : 0;
+    const lastPrice = state.books[pair]?.lastPrice ?? midPrice;
+
+    set((s) => ({
+      books: {
+        ...s.books,
+        [pair]: { pair, bids: bookBids, asks: bookAsks, spread, midPrice, lastPrice, timestamp: Date.now() },
+      },
+    }));
+  },
+
+  updateTradeFromBinance: (pair, price, qty, side, timestamp) => {
+    const state = get();
+    const p = findPair(state.pairs, pair);
+    const trade: Trade = {
+      id: `binance_${timestamp}_${Math.random().toString(36).slice(2, 6)}`,
+      pair,
+      price: round(price, p.priceDecimals),
+      qty: round(qty, p.baseDecimals),
+      side,
+      buyerOrderId: "binance",
+      sellerOrderId: "binance",
+      timestamp,
+    };
+    // Add to trade tape + update lastPrice on the book
+    set((s) => {
+      const trades = [trade, ...s.trades].slice(0, 100);
+      const book = s.books[pair];
+      const books = book
+        ? { ...s.books, [pair]: { ...book, lastPrice: price } }
+        : s.books;
+      return { trades, books };
+    });
+    // Also update the engine's lastPrice so user orders fill at realistic prices
+    const eng = state.engines[pair];
+    if (eng) {
+      (eng as any).lastPrice = price;
+    }
+  },
+
+  updateTickerFromBinance: (pair, lastPrice, priceChangePct, high, low, volume, quoteVolume) => {
+    const state = get();
+    const existing = state.tickers[pair];
+    const priceChange = existing ? lastPrice - (lastPrice - (lastPrice * priceChangePct / 100)) : 0;
+    set((s) => ({
+      tickers: {
+        ...s.tickers,
+        [pair]: {
+          pair,
+          lastPrice,
+          priceChange: priceChange || (lastPrice * priceChangePct / 100),
+          priceChangePct,
+          high,
+          low,
+          volume,
+          quoteVolume,
+        },
+      },
+    }));
+  },
+
+  setKlineHistory: (pair, history) => {
+    liveKlinePairs.add(pair);
+    set((s) => {
+      // Keep any live candle that already arrived (newer than the fetched history).
+      const existing = liveKlinePairs.has(pair) ? s.klines[pair] ?? [] : [];
+      const lastHist = history.length ? history[history.length - 1].openTime : -Infinity;
+      const merged = history.concat(existing.filter((k) => k.openTime > lastHist));
+      return { klines: { ...s.klines, [pair]: merged.slice(-MAX_KLINES) } };
+    });
+  },
+
+  updateKlineFromBinance: (pair, openTime, open, high, low, close, volume) => {
+    set((s) => {
+      // The simulated history is made-up data around a static price: the first real candle replaces it.
+      const first = !liveKlinePairs.has(pair);
+      liveKlinePairs.add(pair);
+      const ks = first ? [] : [...(s.klines[pair] ?? [])];
+      const candle = { openTime, open, high, low, close, volume };
+      const last = ks[ks.length - 1];
+      if (!last || openTime > last.openTime) {
+        ks.push(candle);
+        if (ks.length > MAX_KLINES) ks.splice(0, ks.length - MAX_KLINES);
+      } else if (last.openTime === openTime) {
+        ks[ks.length - 1] = candle;
+      } else {
+        // Late / out-of-order update for an older candle: replace it if we have it, else ignore.
+        const idx = ks.findIndex((k) => k.openTime === openTime);
+        if (idx >= 0) ks[idx] = candle;
+        else return s;
+      }
+      return { klines: { ...s.klines, [pair]: ks } };
+    });
+  },
+
+  placeOrder: ({ pair, side, type, price, qty }) => {
+    const state = get();
+    const eng = state.engines[pair];
+    if (!eng) return { ok: false, reason: "Unknown pair" };
+    const p = findPair(state.pairs, pair);
+
+    // Balance reservation check
+    const baseAsset = p.base;
+    const quoteAsset = p.quote;
+    const isBuy = side === "BUY";
+
+    if (type === "LIMIT" || type === "POST_ONLY") {
+      const cost = (price ?? 0) * qty;
+      const bal = state.balances.find((b) => b.asset === (isBuy ? quoteAsset : baseAsset));
+      if (!bal || bal.free < (isBuy ? cost : qty)) {
+        return { ok: false, reason: `Insufficient ${isBuy ? quoteAsset : baseAsset} balance` };
+      }
+    } else {
+      // MARKET / IOC / FOK — estimate worst-case cost using best ask (BUY) or just check qty (SELL)
+      if (isBuy) {
+        const snap = state.books[pair];
+        // Worst-case cost: the limit price for IOC/FOK, otherwise walk the visible asks.
+        const est = price !== null ? price * qty : estimateBuyCost(snap?.asks ?? [], qty);
+        const bal = state.balances.find((b) => b.asset === quoteAsset);
+        if (!bal || bal.free < est) return { ok: false, reason: `Insufficient ${quoteAsset} for market buy` };
+      } else {
+        const bal = state.balances.find((b) => b.asset === baseAsset);
+        if (!bal || bal.free < qty) return { ok: false, reason: `Insufficient ${baseAsset} balance` };
+      }
+    }
+
+    const result = eng.placeOrder({ pair, side, type, price, qty, userId: CURRENT_USER_ID });
+
+    // Settle the TAKER side from what actually happened:
+    //  - pay/receive at the real fill prices (price improvement is kept by the user)
+    //  - lock funds only for the part of a LIMIT/POST_ONLY order that rests on the book
+    //  - IOC/FOK/MARKET remainders are cancelled, so they never lock anything
+    if (result.order.status !== "REJECTED") {
+      const filledQty = result.trades.reduce((acc, t) => acc + t.qty, 0);
+      const filledCost = result.trades.reduce((acc, t) => acc + t.qty * t.price, 0);
+      const rests =
+        (type === "LIMIT" || type === "POST_ONLY") &&
+        (result.order.status === "NEW" || result.order.status === "PARTIALLY_FILLED") &&
+        result.order.remainingQty > 0;
+      const restQty = rests ? result.order.remainingQty : 0;
+      const lockQuote = round((price ?? 0) * restQty, 8);
+
+      set((s) => ({
+        balances: s.balances.map((b) => {
+          if (isBuy) {
+            if (b.asset === quoteAsset) {
+              return { ...b, free: round(b.free - filledCost - lockQuote, 8), locked: round(b.locked + lockQuote, 8) };
+            }
+            if (b.asset === baseAsset) return { ...b, free: round(b.free + filledQty, 8) };
+          } else {
+            if (b.asset === baseAsset) {
+              return { ...b, free: round(b.free - filledQty - restQty, 8), locked: round(b.locked + restQty, 8) };
+            }
+            if (b.asset === quoteAsset) return { ...b, free: round(b.free + filledCost, 8) };
+          }
+          return b;
+        }),
+      }));
+    }
+
+    // Push events
+    for (const ev of result.events) {
+      get().pushEvent(ev.subject, ev.payload);
+    }
+
+    return { ok: true, order: result.order };
+  },
+
+  cancelOrder: (orderId) => {
+    const state = get();
+    const order = state.orders.find((o) => o.id === orderId);
+    if (!order) return;
+    if (order.status !== "NEW" && order.status !== "PARTIALLY_FILLED") return;
+    const eng = state.engines[order.pair];
+    if (!eng) return;
+    const ok = eng.cancel(orderId);
+    if (ok) {
+      // Release locked balance
+      set((s) => {
+        const p = findPair(s.pairs, order.pair);
+        const isBuy = order.side === "BUY";
+        const reserved = isBuy ? (order.price ?? 0) * order.remainingQty : order.remainingQty;
+        const balances = s.balances.map((b) => {
+          if (b.asset === (isBuy ? p.quote : p.base)) {
+            return { ...b, free: round(b.free + reserved, 8), locked: round(Math.max(0, b.locked - reserved), 8) };
+          }
+          return b;
+        });
+        const orders = s.orders.map((o) => (o.id === orderId ? { ...o, status: "CANCELLED" as const, remainingQty: 0 } : o));
+        return { balances, orders };
+      });
+      get().pushEvent("orders.cancelled", { id: orderId });
+    }
+  },
+
+  requestWithdrawal: ({ asset, chain, amount }) => {
+    const state = get();
+    const bal = state.balances.find((b) => b.asset === asset);
+    if (!bal || bal.free < amount) return { ok: false, reason: "Insufficient balance" };
+    const chainInfo = state.chains.find((c) => c.name === chain);
+    const fee = chainInfo ? chainInfo.withdrawalFeeUSD / (INITIAL_PRICES[`${asset}/USDT`] ?? 1) : 0;
+    const w: Withdrawal = {
+      id: uid("w"),
+      asset,
+      chain,
+      amount,
+      fee: round(fee, 6),
+      address: state.whitelist[0]?.address ?? "",
+      txHash: null,
+      status: "PENDING",
+      timestamp: Date.now(),
+    };
+    set((s) => ({
+      withdrawals: [w, ...s.withdrawals],
+      balances: s.balances.map((b) => (b.asset === asset ? { ...b, free: round(b.free - amount, 8), locked: round(b.locked + amount, 8) } : b)),
+    }));
+    get().pushEvent("withdrawals.completed", w);
+    return { ok: true };
+  },
+
+  addWhitelist: ({ asset, chain, address, label }) => {
+    const item: WhitelistedAddress = {
+      id: uid("wa"),
+      asset,
+      chain,
+      address,
+      label,
+      addedAt: Date.now(),
+      timeLockHours: 24,
+    };
+    set((s) => ({ whitelist: [item, ...s.whitelist] }));
+  },
+
+  pushEvent: (subject, payload) => {
+    const ev: SystemEvent = {
+      id: uid("ev"),
+      subject,
+      payload,
+      timestamp: Date.now(),
+    };
+    set((s) => ({ events: [ev, ...s.events].slice(0, 200) }));
+  },
+}));
+
+function round(n: number, d: number) {
+  const f = Math.pow(10, d);
+  return Math.round(n * f) / f;
+}
+
+/** Cost of buying `qty` by walking the visible ask levels (extrapolates at the last level). */
+export function estimateBuyCost(asks: Array<{ price: number; qty: number }>, qty: number): number {
+  let remaining = qty;
+  let cost = 0;
+  for (const lvl of asks) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, lvl.qty);
+    cost += take * lvl.price;
+    remaining -= take;
+  }
+  if (remaining > 0 && asks.length > 0) cost += remaining * asks[asks.length - 1].price;
+  return cost;
+}
+MBUNI_CANDLE_EOF
+w 'src/lib/opencex/store.test.ts' <<'MBUNI_CANDLE_EOF'
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { estimateBuyCost, useOpenCEX } from "./store";
+
+const PAIR = "BTC/USDT";
+const bal = (asset: string) => useOpenCEX.getState().balances.find((b) => b.asset === asset)!;
+
+function fresh() {
+  const s = useOpenCEX.getState();
+  if (s.engineInterval) clearInterval(s.engineInterval);
+  useOpenCEX.setState({ started: false, engineInterval: null, orders: [], trades: [] });
+  useOpenCEX.getState().init();
+  // stop the bot ticker so tests are deterministic
+  const i = useOpenCEX.getState().engineInterval;
+  if (i) clearInterval(i);
+  useOpenCEX.setState({ engineInterval: null });
+}
+
+describe("store settlement", () => {
+  beforeEach(fresh);
+  afterAll(() => {
+    const i = useOpenCEX.getState().engineInterval;
+    if (i) clearInterval(i);
+  });
+
+  it("MARKET buy debits quote and credits base", () => {
+    const usdt0 = bal("USDT").free, btc0 = bal("BTC").free;
+    const r = useOpenCEX.getState().placeOrder({ pair: PAIR, side: "BUY", type: "MARKET", price: null, qty: 0.01 });
+    expect(r.ok).toBe(true);
+    expect(r.order!.status).toBe("FILLED");
+    expect(bal("USDT").free).toBeLessThan(usdt0 - 100); // ~0.01 BTC ≈ $800 paid
+    expect(bal("BTC").free).toBeCloseTo(btc0 + 0.01, 8);
+    expect(bal("USDT").locked).toBe(4200); // untouched
+  });
+
+  it("LIMIT buy that crosses pays the FILL price, not the limit price", () => {
+    const ask = useOpenCEX.getState().books[PAIR].asks[0].price;
+    const usdt0 = bal("USDT").free;
+    const r = useOpenCEX.getState().placeOrder({ pair: PAIR, side: "BUY", type: "LIMIT", price: ask + 500, qty: 0.01 });
+    expect(r.order!.status).toBe("FILLED");
+    expect(usdt0 - bal("USDT").free).toBeCloseTo(0.01 * ask, 4);
+  });
+
+  it("FOK that cannot fill (CANCELLED) locks nothing", () => {
+    const top = useOpenCEX.getState().books[PAIR].asks[0];
+    const before = { f: bal("USDT").free, l: bal("USDT").locked };
+    const r = useOpenCEX.getState().placeOrder({ pair: PAIR, side: "BUY", type: "FOK", price: top.price, qty: top.qty + 1 });
+    expect(r.order!.status).toBe("CANCELLED");
+    expect(bal("USDT").free).toBe(before.f);
+    expect(bal("USDT").locked).toBe(before.l);
+  });
+
+  it("IOC partial fill does not lock the cancelled remainder", () => {
+    const top = useOpenCEX.getState().books[PAIR].asks[0];
+    const l0 = bal("USDT").locked;
+    const f0 = bal("USDT").free;
+    const r = useOpenCEX.getState().placeOrder({ pair: PAIR, side: "BUY", type: "IOC", price: top.price, qty: top.qty + 1 });
+    expect(r.order!.status).toBe("PARTIALLY_FILLED");
+    expect(bal("USDT").locked).toBe(l0);
+    expect(f0 - bal("USDT").free).toBeCloseTo(top.qty * top.price, 4);
+  });
+
+  it("resting LIMIT locks funds and cancel releases them", () => {
+    const l0 = bal("USDT").locked, f0 = bal("USDT").free;
+    const px = useOpenCEX.getState().books[PAIR].bids[0].price - 100; // well below the book → rests
+    const r = useOpenCEX.getState().placeOrder({ pair: PAIR, side: "BUY", type: "LIMIT", price: px, qty: 0.1 });
+    expect(r.order!.status).toBe("NEW");
+    expect(bal("USDT").locked).toBeCloseTo(l0 + px * 0.1, 4);
+    useOpenCEX.getState().cancelOrder(r.order!.id);
+    expect(bal("USDT").locked).toBeCloseTo(l0, 4);
+    expect(bal("USDT").free).toBeCloseTo(f0, 4);
+  });
+
+  it("when another trader fills the user's resting order, balances and order status settle", () => {
+    const px = useOpenCEX.getState().books[PAIR].bids[0].price - 100;
+    const r = useOpenCEX.getState().placeOrder({ pair: PAIR, side: "BUY", type: "LIMIT", price: px, qty: 0.1 });
+    const l1 = bal("USDT").locked, btc1 = bal("BTC").free;
+    const eng = useOpenCEX.getState().engines[PAIR];
+    eng.placeOrder({ pair: PAIR, side: "SELL", type: "MARKET", price: null, qty: 100, userId: "someone-else" }); // sweeps the whole bid side
+    const o = useOpenCEX.getState().orders.find((x) => x.id === r.order!.id)!;
+    expect(o.status).toBe("FILLED");
+    expect(o.remainingQty).toBe(0);
+    expect(bal("USDT").locked).toBeCloseTo(l1 - px * 0.1, 4);
+    expect(bal("BTC").free).toBeCloseTo(btc1 + 0.1, 8);
+  });
+
+  it("estimateBuyCost walks levels and extrapolates", () => {
+    expect(estimateBuyCost([{ price: 10, qty: 1 }, { price: 11, qty: 1 }], 1.5)).toBeCloseTo(10 + 5.5);
+    expect(estimateBuyCost([{ price: 10, qty: 1 }], 3)).toBeCloseTo(30);
+  });
+});
+
+describe("candles", () => {
+  beforeEach(fresh);
+  const minute = () => Math.floor(Date.now() / 60_000) * 60_000;
+
+  it("synthetic history is minute-aligned", () => {
+    const ks = useOpenCEX.getState().klines[PAIR];
+    expect(ks.every((k) => k.openTime % 60_000 === 0)).toBe(true);
+  });
+
+  it("first live candle replaces the simulated history (was silently dropped)", () => {
+    useOpenCEX.getState().updateKlineFromBinance(PAIR, minute(), 110000, 110100, 109900, 110050, 5, false);
+    const ks = useOpenCEX.getState().klines[PAIR];
+    expect(ks).toHaveLength(1);
+    expect(ks[0].close).toBe(110050);
+  });
+
+  it("same-minute updates replace, next minute appends, stale updates are ignored", () => {
+    const t = minute();
+    const u = useOpenCEX.getState().updateKlineFromBinance;
+    u(PAIR, t, 1, 2, 0.5, 1.5, 1, false);
+    u(PAIR, t, 1, 3, 0.5, 2.5, 2, false);
+    u(PAIR, t + 60_000, 2.5, 3, 2, 2.8, 1, false);
+    u(PAIR, t - 600_000, 9, 9, 9, 9, 9, true); // unknown older candle
+    const ks = useOpenCEX.getState().klines[PAIR];
+    expect(ks.map((k) => k.close)).toEqual([2.5, 2.8]);
+  });
+
+  it("history from REST is kept and live candles merge onto it", () => {
+    const t = minute();
+    const hist = [t - 120_000, t - 60_000].map((openTime) => ({ openTime, open: 1, high: 2, low: 0.5, close: 1.5, volume: 1 }));
+    useOpenCEX.getState().setKlineHistory(PAIR, hist);
+    useOpenCEX.getState().updateKlineFromBinance(PAIR, t, 1.5, 2, 1, 1.8, 1, false);
+    const ks = useOpenCEX.getState().klines[PAIR];
+    expect(ks.map((k) => k.openTime)).toEqual([t - 120_000, t - 60_000, t]);
+  });
+
+  it("simulated trades roll a new candle each minute", () => {
+    const before = useOpenCEX.getState().klines[PAIR];
+    const lastOpen = before[before.length - 1].openTime;
+    const eng = useOpenCEX.getState().engines[PAIR];
+    // pretend the last candle is two minutes old
+    useOpenCEX.setState({ klines: { ...useOpenCEX.getState().klines, [PAIR]: before.map((k, i) => (i === before.length - 1 ? { ...k, openTime: lastOpen - 120_000 } : k)) } });
+    eng.placeOrder({ pair: PAIR, side: "BUY", type: "MARKET", price: null, qty: 0.01, userId: "x" });
+    const after = useOpenCEX.getState().klines[PAIR];
+    expect(after.length).toBe(before.length + 1);
+  });
+});
+MBUNI_CANDLE_EOF
+w 'src/lib/opencex/use-binance-feed.ts' <<'MBUNI_CANDLE_EOF'
+"use client";
+
+import { useEffect, useRef } from "react";
+import { useOpenCEX } from "@/lib/opencex/store";
+import { BinanceFeed, fetchKlineHistory, type BinanceDepth, type BinanceKline, type BinanceTicker, type BinanceTrade } from "@/lib/opencex/binance-feed";
+
+// Binance can emit dozens of trade/depth/ticker/kline messages per second.
+// Applying each one straight to the store means one Zustand update (and one
+// round of selector runs) per message. We coalesce them: only the latest
+// depth/ticker/kline per flush window is applied, trades are applied in order.
+const FLUSH_MS = 100;
+const MAX_PENDING_TRADES = 200; // bound memory if the tab is throttled in the background
+
+/**
+ * Hook that connects the Binance WebSocket feed to the Zustand store.
+ *
+ * Call this once in the trading view (or any component that's always mounted
+ * while the app is showing trading data). It will:
+ *   1. Enable live mode (real Binance data instead of simulated bots)
+ *   2. Connect to Binance's WebSocket for the active pair
+ *   3. Switch streams when the active pair changes
+ *   4. Clean up on unmount
+ */
+export function useBinanceFeed() {
+  const activePair = useOpenCEX((s) => s.activePair);
+  const setLiveMode = useOpenCEX((s) => s.setLiveMode);
+  const setFeedConnected = useOpenCEX((s) => s.setFeedConnected);
+  const setFeed = useOpenCEX((s) => s.setFeed);
+  const updateBook = useOpenCEX((s) => s.updateBookFromBinance);
+  const updateTrade = useOpenCEX((s) => s.updateTradeFromBinance);
+  const updateTicker = useOpenCEX((s) => s.updateTickerFromBinance);
+  const updateKline = useOpenCEX((s) => s.updateKlineFromBinance);
+  const setKlineHistory = useOpenCEX((s) => s.setKlineHistory);
+
+  const loadHistory = (pair: string, signal: AbortSignal) => {
+    fetchKlineHistory(pair, 2, signal)
+      .then((h) => { if (!signal.aborted && h.length) setKlineHistory(pair, h); })
+      .catch((e) => { if (!signal.aborted) console.warn("[feed] kline history unavailable, chart will build from live candles:", e); });
+  };
+  const historyAbortRef = useRef<AbortController | null>(null);
+
+  const feedRef = useRef<BinanceFeed | null>(null);
+  // The pair the live socket is currently subscribed to (set on mount).
+  const connectedPairRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setLiveMode(true);
+
+    let depth: BinanceDepth | null = null;
+    let ticker: BinanceTicker | null = null;
+    let kline: BinanceKline | null = null;
+    let trades: BinanceTrade[] = [];
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const flush = () => {
+      timer = null;
+      const d = depth, tk = ticker, k = kline, tr = trades;
+      depth = ticker = kline = null;
+      trades = [];
+      if (d) updateBook(d.pair, d.bids, d.asks);
+      for (const t of tr) updateTrade(t.pair, t.price, t.qty, t.side, t.timestamp);
+      if (tk) updateTicker(tk.pair, tk.lastPrice, tk.priceChangePct, tk.high, tk.low, tk.volume, tk.quoteVolume);
+      if (k) updateKline(k.pair, k.openTime, k.open, k.high, k.low, k.close, k.volume, k.isClosed);
+    };
+    const schedule = () => {
+      if (timer === null) timer = setTimeout(flush, FLUSH_MS);
+    };
+
+    const initialPair = useOpenCEX.getState().activePair;
+    const feed = new BinanceFeed(initialPair, {
+      onConnect: () => setFeedConnected(true),
+      onDisconnect: () => setFeedConnected(false),
+      onDepth: (d) => { depth = d; schedule(); },
+      onTrade: (t) => {
+        trades.push(t);
+        if (trades.length > MAX_PENDING_TRADES) trades.splice(0, trades.length - MAX_PENDING_TRADES);
+        schedule();
+      },
+      onTicker: (t) => { ticker = t; schedule(); },
+      onKline: (k) => {
+        // A closed candle must never be dropped in favour of a later open one.
+        if (kline && kline.isClosed && kline.openTime !== k.openTime) updateKline(kline.pair, kline.openTime, kline.open, kline.high, kline.low, kline.close, kline.volume, kline.isClosed);
+        kline = k;
+        schedule();
+      },
+    });
+
+    feed.connect();
+    historyAbortRef.current = new AbortController();
+    loadHistory(initialPair, historyAbortRef.current.signal);
+    feedRef.current = feed;
+    connectedPairRef.current = initialPair;
+    setFeed(feed);
+
+    return () => {
+      if (timer !== null) clearTimeout(timer);
+      historyAbortRef.current?.abort();
+      feed.close();
+      feedRef.current = null;
+      connectedPairRef.current = null;
+      setFeed(null);
+      setFeedConnected(false);
+      setLiveMode(false);
+    };
+  }, []); // Connect once on mount
+
+  // Switch streams when the active pair changes (skipped on mount: the feed
+  // was just created for this pair, and switching would tear down the socket
+  // that is still handshaking).
+  useEffect(() => {
+    const feed = feedRef.current;
+    if (!feed || connectedPairRef.current === activePair) return;
+    connectedPairRef.current = activePair;
+    feed.switchPair(activePair);
+    historyAbortRef.current?.abort();
+    historyAbortRef.current = new AbortController();
+    loadHistory(activePair, historyAbortRef.current.signal);
+  }, [activePair]);
+}
+MBUNI_CANDLE_EOF
+w 'src/components/opencex/price-chart.tsx' <<'MBUNI_CANDLE_EOF'
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useOpenCEX } from "@/lib/opencex/store";
+import { fmtPrice, fmtCompact } from "@/lib/opencex/format";
+import type { Kline } from "@/lib/opencex/types";
+
+const TIMEFRAMES = [
+  { label: "1m", minutes: 1 },
+  { label: "5m", minutes: 5 },
+  { label: "15m", minutes: 15 },
+  { label: "1h", minutes: 60 },
+  { label: "4h", minutes: 240 },
+];
+
+const EMPTY_KLINES: Kline[] = [];
+
+// Design-system colours (lime = up, red = down)
+const UP = "#a3e635";
+const DOWN = "#ff5c5c";
+const GRID = "rgba(255,255,255,0.08)";
+const LABEL = "#9ca3af";
+const MAX_VISIBLE = 120; // candles drawn at once
+
+/** Aggregate 1m candles into `minutes`-wide buckets aligned to wall-clock boundaries. */
+export function aggregateKlines(klines: Kline[], minutes: number): Kline[] {
+  if (!klines.length) return [];
+  if (minutes <= 1) return klines;
+  const ms = minutes * 60_000;
+  const out: Kline[] = [];
+  for (const k of klines) {
+    const bucket = Math.floor(k.openTime / ms) * ms;
+    const cur = out[out.length - 1];
+    if (cur && cur.openTime === bucket) {
+      cur.high = Math.max(cur.high, k.high);
+      cur.low = Math.min(cur.low, k.low);
+      cur.close = k.close;
+      cur.volume += k.volume;
+    } else {
+      out.push({ openTime: bucket, open: k.open, high: k.high, low: k.low, close: k.close, volume: k.volume });
+    }
+  }
+  return out;
+}
+
+function fmtAxis(ts: number, minutes: number): string {
+  const d = new Date(ts);
+  const t = d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" });
+  return minutes >= 60 ? `${d.getMonth() + 1}/${d.getDate()} ${t}` : t;
+}
+
+/** Track the real pixel size of an element so the SVG is never stretched (text/candles stay undistorted). */
+function useElementSize<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [size, setSize] = useState({ w: 800, h: 360 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0) setSize({ w: Math.round(width), h: Math.round(height) });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, size] as const;
+}
+
+
+export function PriceChart({ pair }: { pair: string }) {
+  const klines = useOpenCEX((s) => s.klines[pair]) ?? EMPTY_KLINES;
+  const book = useOpenCEX((s) => s.books[pair]);
+  const p = useOpenCEX((s) => s.pairs.find((x) => x.symbol === pair));
+  const liveMode = useOpenCEX((s) => s.liveMode);
+  const feedConnected = useOpenCEX((s) => s.feedConnected);
+  const [tf, setTf] = useState(1);
+  const [hover, setHover] = useState<Kline | null>(null);
+  const [wrapRef, { w: W, h: H }] = useElementSize<HTMLDivElement>();
+
+  const aggregated = useMemo(() => aggregateKlines(klines, tf).slice(-MAX_VISIBLE), [klines, tf]);
+
+  if (!p) return null;
+
+  const display = hover ?? aggregated[aggregated.length - 1] ?? null;
+  const lastPrice = book?.lastPrice ?? display?.close ?? 0;
+  const firstPrice = aggregated[0]?.open ?? lastPrice;
+  const changePct = firstPrice ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
+  const up = changePct >= 0;
+
+  // Chart geometry (real pixels)
+  const volH = Math.min(60, H * 0.16);
+  const padL = 8;
+  const padR = 72;
+  const padT = 10;
+  const padB = 18;
+  const priceH = H - volH - padB - 6;
+  const chartW = Math.max(1, W - padL - padR);
+  const chartH = Math.max(1, priceH - padT);
+  const n = aggregated.length;
+
+  // Include the last price in the scale so the price line can never fall outside the plot.
+  const lows = aggregated.map((k) => k.low);
+  const highs = aggregated.map((k) => k.high);
+  const minPrice = n ? Math.min(...lows, lastPrice || Infinity) : 0;
+  const maxPrice = n ? Math.max(...highs, lastPrice || -Infinity) : 1;
+  const pad = (maxPrice - minPrice) * 0.04 || maxPrice * 0.001 || 1;
+  const lo = minPrice - pad;
+  const hi = maxPrice + pad;
+  const maxVol = n ? Math.max(...aggregated.map((k) => k.volume), 1e-9) : 1;
+
+  const slot = n ? chartW / n : chartW;
+  const candleW = Math.max(1.5, slot * 0.7);
+  const xFor = (i: number) => padL + slot * (i + 0.5);
+  const yFor = (price: number) => padT + (1 - (price - lo) / (hi - lo)) * chartH;
+
+  const gridLines = Array.from({ length: 5 }, (_, i) => {
+    const v = lo + ((hi - lo) * i) / 4;
+    return { y: yFor(v), v };
+  });
+  const lastColor = up ? UP : DOWN;
+  const status = !liveMode ? "SIMULATED" : feedConnected ? "LIVE · BINANCE" : "CONNECTING…";
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-2 md:px-3 py-2 border-b border-border flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+          <span className="text-xs font-semibold uppercase tracking-wider text-secondary shrink-0">{p.symbol}</span>
+          {/* Compact change indicator — mobile only */}
+          <span className={`md:hidden px-1.5 py-0.5 rounded text-[10px] ${up ? "bg-primary/15 text-primary" : "bg-danger/15 text-danger"}`}>
+            {up ? "+" : ""}{changePct.toFixed(2)}%
+          </span>
+          {/* Full OHLC — desktop only */}
+          <div className="hidden md:flex items-center gap-1 text-xs tabular">
+            <span className="text-secondary">O</span>
+            <span className={up ? "text-primary" : "text-danger"}>{fmtPrice(display?.open, p.priceDecimals)}</span>
+            <span className="text-secondary ml-1">H</span>
+            <span className={up ? "text-primary" : "text-danger"}>{fmtPrice(display?.high, p.priceDecimals)}</span>
+            <span className="text-secondary ml-1">L</span>
+            <span className={up ? "text-primary" : "text-danger"}>{fmtPrice(display?.low, p.priceDecimals)}</span>
+            <span className="text-secondary ml-1">C</span>
+            <span className={up ? "text-primary" : "text-danger"}>{fmtPrice(display?.close ?? lastPrice, p.priceDecimals)}</span>
+            <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${up ? "bg-primary/15 text-primary" : "bg-danger/15 text-danger"}`}>
+              {up ? "+" : ""}{changePct.toFixed(2)}%
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {TIMEFRAMES.map((t) => (
+            <button
+              key={t.label}
+              onClick={() => setTf(t.minutes)}
+              className={`px-2 py-0.5 text-[11px] rounded ${
+                tf === t.minutes ? "bg-elevated text-foreground" : "text-secondary hover:bg-elevated/70"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div ref={wrapRef} className="flex-1 relative overflow-hidden min-h-[160px]">
+        {n === 0 ? (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-secondary">Loading candles…</div>
+        ) : (
+          <svg
+            width={W}
+            height={H}
+            viewBox={`0 0 ${W} ${H}`}
+            className="absolute inset-0 block"
+            onMouseMove={(e) => {
+              const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+              const idx = Math.floor((e.clientX - rect.left - padL) / slot);
+              const k = aggregated[idx];
+              if (k) setHover(k);
+            }}
+            onMouseLeave={() => setHover(null)}
+          >
+            {gridLines.map((g, i) => (
+              <g key={i}>
+                <line x1={padL} y1={g.y} x2={padL + chartW} y2={g.y} stroke={GRID} strokeDasharray="2 3" />
+                <text x={padL + chartW + 6} y={g.y + 3} fill={LABEL} fontSize="10" className="tabular">
+                  {fmtPrice(g.v, p.priceDecimals)}
+                </text>
+              </g>
+            ))}
+
+            {aggregated.map((k, i) => {
+              const x = xFor(i);
+              const isUp = k.close >= k.open;
+              const color = isUp ? UP : DOWN;
+              const yOpen = yFor(k.open);
+              const yClose = yFor(k.close);
+              const top = Math.min(yOpen, yClose);
+              const h = Math.max(1, Math.abs(yClose - yOpen));
+              const vh = (k.volume / maxVol) * volH;
+              return (
+                <g key={k.openTime}>
+                  <line x1={x} y1={yFor(k.high)} x2={x} y2={yFor(k.low)} stroke={color} strokeWidth="1" />
+                  <rect x={x - candleW / 2} y={top} width={candleW} height={h} fill={color} opacity={0.9} />
+                  <rect x={x - candleW / 2} y={priceH + 6 + (volH - vh)} width={candleW} height={vh} fill={color} opacity={0.3} />
+                </g>
+              );
+            })}
+
+            {/* last price line + tag */}
+            <line x1={padL} y1={yFor(lastPrice)} x2={padL + chartW} y2={yFor(lastPrice)} stroke={lastColor} strokeDasharray="3 3" strokeWidth="1" />
+            <rect x={padL + chartW} y={yFor(lastPrice) - 8} width={padR} height={16} fill={lastColor} />
+            <text x={padL + chartW + 4} y={yFor(lastPrice) + 3} fill="#000" fontSize="10" fontWeight="600" className="tabular">
+              {fmtPrice(lastPrice, p.priceDecimals)}
+            </text>
+
+            {/* time axis */}
+            {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+              const idx = Math.min(n - 1, Math.floor(t * (n - 1)));
+              const k = aggregated[idx];
+              if (!k) return null;
+              return (
+                <text key={t} x={xFor(idx)} y={H - 4} fill={LABEL} fontSize="9" className="tabular" textAnchor={t === 0 ? "start" : t === 1 ? "end" : "middle"}>
+                  {fmtAxis(k.openTime, tf)}
+                </text>
+              );
+            })}
+          </svg>
+        )}
+      </div>
+
+      <div className="px-2 md:px-3 py-1 border-t border-border flex items-center justify-between text-[10px] text-secondary">
+        <span>Vol: <span className="tabular text-foreground">{fmtCompact(aggregated.reduce((s, k) => s + k.volume, 0))} {p.base}</span></span>
+        <span className="hidden sm:inline">{aggregated.length} candles · {hover ? "Hover: " + fmtAxis(hover.openTime, tf) : status}</span>
+        <span className="sm:hidden">{hover ? fmtAxis(hover.openTime, tf) : status}</span>
+      </div>
+    </div>
+  );
+}
+MBUNI_CANDLE_EOF
+w 'src/components/opencex/price-chart.test.ts' <<'MBUNI_CANDLE_EOF'
+import { describe, expect, it } from "vitest";
+import { aggregateKlines } from "./price-chart";
+
+const k = (m: number, o: number, h: number, l: number, c: number, v = 1) => ({ openTime: m * 60_000, open: o, high: h, low: l, close: c, volume: v });
+
+describe("aggregateKlines", () => {
+  it("buckets by wall-clock boundary, not array position", () => {
+    // 5m buckets: minutes 3,4 | 5..9 | 10
+    const out = aggregateKlines([k(3, 1, 2, 1, 2), k(4, 2, 3, 2, 3), k(5, 3, 5, 3, 4), k(9, 4, 6, 1, 5), k(10, 5, 5, 5, 5)], 5);
+    expect(out.map((c) => c.openTime / 60_000)).toEqual([0, 5, 10]);
+    expect(out[1]).toMatchObject({ open: 3, high: 6, low: 1, close: 5, volume: 2 });
+  });
+  it("is stable when a new candle is appended (older buckets don't shift)", () => {
+    const base = [k(0, 1, 1, 1, 1), k(1, 1, 2, 1, 2), k(5, 2, 2, 2, 2)];
+    const a = aggregateKlines(base, 5);
+    const b = aggregateKlines([...base, k(6, 2, 3, 2, 3)], 5);
+    expect(b[0]).toEqual(a[0]);
+  });
+  it("does not mutate the input", () => {
+    const input = [k(0, 1, 2, 1, 2), k(1, 2, 3, 2, 3)];
+    aggregateKlines(input, 5);
+    expect(input[0].high).toBe(2);
+  });
+});
+MBUNI_CANDLE_EOF
+w 'infra/caddy/Caddyfile' <<'MBUNI_CANDLE_EOF'
+# =============================================================================
+# Mbuni CEX — Caddy reverse proxy config
+#
+# Caddy automatically provisions + renews Let's Encrypt TLS certificates for
+# real domains. For local dev (DOMAIN=localhost), it serves plain HTTP on :80.
+#
+# The {$DOMAIN} placeholder reads from the `DOMAIN` env var set in
+# docker-compose.yml.
+# =============================================================================
+
+{
+	# Global options
+	email admin@{$DOMAIN}
+	# Uncomment for staging certificates (don't hit rate limits while testing):
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# ----- Production domain (auto-TLS via Let's Encrypt) -----
+# When DOMAIN is a real domain (e.g. cex.example.com), Caddy auto-provisions
+# TLS certs. When DOMAIN=localhost, Caddy falls back to plain HTTP.
+{$DOMAIN} {
+	encode gzip zstd
+
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# CSP — adjust to match your needs; the app is same-origin by default
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.binance.com wss://stream.binance.com:9443; frame-ancestors 'none';"
+		# Remove Server header for security through obscurity (mild)
+		-Server
+	}
+
+	# Proxy to the Next.js app
+	reverse_proxy {$APP_HOST} {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# Compression for static assets
+	@static path /_next/static/* /public/*
+	header @static Cache-Control "public, max-age=31536000, immutable"
+}
+
+# ----- Local dev fallback (HTTP on :80, no TLS) -----
+# When DOMAIN=localhost the block above already handles it (Caddy is smart
+# about not attempting TLS for localhost). If you want explicit HTTP-only
+# config, uncomment the block below and comment out the {$DOMAIN} block above.
+#
+# :80 {
+# 	reverse_proxy {$APP_HOST}
+# }
+MBUNI_CANDLE_EOF

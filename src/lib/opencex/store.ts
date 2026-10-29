@@ -82,6 +82,7 @@ interface MbuniCEXState {
   updateBookFromBinance: (pair: string, bids: Array<[number, number]>, asks: Array<[number, number]>) => void;
   updateTradeFromBinance: (pair: string, price: number, qty: number, side: "BUY" | "SELL", timestamp: number) => void;
   updateTickerFromBinance: (pair: string, lastPrice: number, priceChangePct: number, high: number, low: number, volume: number, quoteVolume: number) => void;
+  setKlineHistory: (pair: string, klines: Kline[]) => void;
   updateKlineFromBinance: (pair: string, openTime: number, open: number, high: number, low: number, close: number, volume: number, isClosed: boolean) => void;
   placeOrder: (params: { pair: string; side: Side; type: Order["type"]; price: number | null; qty: number }) => { ok: boolean; reason?: string; order?: Order };
   cancelOrder: (orderId: string) => void;
@@ -89,6 +90,10 @@ interface MbuniCEXState {
   addWhitelist: (params: { asset: string; chain: string; address: string; label: string }) => void;
   pushEvent: (subject: SystemEvent["subject"], payload: unknown) => void;
 }
+
+const MAX_KLINES = 2000;
+/** Pairs whose candles come from Binance (history/live) rather than the simulator. */
+const liveKlinePairs = new Set<string>();
 
 function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -147,6 +152,7 @@ export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
 
   init: () => {
     if (get().started) return;
+    liveKlinePairs.clear(); // fresh session: candles start as simulated until the live feed supplies real ones
     const engines: Record<string, MatchingEngine> = {};
     const books: Record<string, OrderBookSnapshot> = {};
     const tickers: Record<string, Ticker24h> = {};
@@ -155,7 +161,7 @@ export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
     for (const pair of TRADING_PAIRS) {
       const initial = INITIAL_PRICES[pair.symbol] ?? 100;
       const eng = new MatchingEngine(pair, initial);
-      eng.seedBook(initial, 14, pair.base === "BTC" ? 0.4 : pair.base === "ETH" ? 1.2 : 50);
+      eng.seedBook(initial, 25, pair.base === "BTC" ? 0.4 : pair.base === "ETH" ? 1.2 : 50);
       engines[pair.symbol] = eng;
       books[pair.symbol] = eng.getSnapshot();
       const ks = generateKlines(pair.symbol, initial, 360);
@@ -163,30 +169,70 @@ export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
       tickers[pair.symbol] = buildTicker(pair.symbol, initial, ks);
 
       eng.onTrade = (t) => {
-        // Append to global trade tape
-        set((s) => ({ trades: [t, ...s.trades].slice(0, 100) }));
-        // Update ticker lastPrice
+        // One store update per trade (was three), including settlement when one of the
+        // user's RESTING orders is the maker side of this trade.
         set((s) => {
+          const next: Partial<MbuniCEXState> = { trades: [t, ...s.trades].slice(0, 100) };
+
           const tk = s.tickers[pair.symbol];
-          if (!tk) return {};
-          return {
-            tickers: {
+          if (tk) {
+            next.tickers = {
               ...s.tickers,
               [pair.symbol]: { ...tk, lastPrice: t.price, priceChange: t.price - tk.lastPrice + tk.priceChange },
-            },
-          };
-        });
-        // Push kline update (last candle)
-        set((s) => {
-          const ks = s.klines[pair.symbol] ? [...s.klines[pair.symbol]] : [];
-          if (ks.length === 0) return {};
-          const last = { ...ks[ks.length - 1] };
-          last.close = t.price;
-          last.high = Math.max(last.high, t.price);
-          last.low = Math.min(last.low, t.price);
-          last.volume = round(last.volume + t.qty, 6);
-          ks[ks.length - 1] = last;
-          return { klines: { ...s.klines, [pair.symbol]: ks } };
+            };
+          }
+
+          const cur = s.klines[pair.symbol];
+          if (cur && cur.length > 0) {
+            const ks = cur.slice();
+            const bucket = Math.floor(t.timestamp / 60_000) * 60_000;
+            const prev = ks[ks.length - 1];
+            if (bucket > prev.openTime) {
+              // New minute: roll a fresh candle (previously the last candle absorbed every trade forever).
+              ks.push({ openTime: bucket, open: prev.close, high: Math.max(prev.close, t.price), low: Math.min(prev.close, t.price), close: t.price, volume: round(t.qty, 6) });
+              if (ks.length > MAX_KLINES) ks.splice(0, ks.length - MAX_KLINES);
+            } else {
+              const last = { ...prev };
+              last.close = t.price;
+              last.high = Math.max(last.high, t.price);
+              last.low = Math.min(last.low, t.price);
+              last.volume = round(last.volume + t.qty, 6);
+              ks[ks.length - 1] = last;
+            }
+            next.klines = { ...s.klines, [pair.symbol]: ks };
+          }
+
+          // Maker = the side opposite the aggressor.
+          const makerId = t.side === "BUY" ? t.sellerOrderId : t.buyerOrderId;
+          const mi = s.orders.findIndex((o) => o.id === makerId);
+          if (mi >= 0) {
+            const mo = s.orders[mi];
+            const makerIsBuy = mo.side === "BUY";
+            const filled = round(mo.filledQty + t.qty, pair.baseDecimals);
+            const remaining = Math.max(0, round(mo.remainingQty - t.qty, pair.baseDecimals));
+            const prevCost = (mo.avgFillPrice ?? 0) * mo.filledQty;
+            const orders = s.orders.slice();
+            orders[mi] = {
+              ...mo,
+              filledQty: filled,
+              remainingQty: remaining,
+              status: remaining <= 0 ? "FILLED" : "PARTIALLY_FILLED",
+              avgFillPrice: round((prevCost + t.qty * t.price) / filled, pair.priceDecimals),
+            };
+            next.orders = orders;
+            const cost = t.qty * t.price;
+            next.balances = s.balances.map((b) => {
+              if (makerIsBuy) {
+                if (b.asset === pair.quote) return { ...b, locked: round(Math.max(0, b.locked - cost), 8) };
+                if (b.asset === pair.base) return { ...b, free: round(b.free + t.qty, 8) };
+              } else {
+                if (b.asset === pair.base) return { ...b, locked: round(Math.max(0, b.locked - t.qty), 8) };
+                if (b.asset === pair.quote) return { ...b, free: round(b.free + cost, 8) };
+              }
+              return b;
+            });
+          }
+          return next;
         });
       };
       eng.onBookUpdate = (snap) => {
@@ -258,6 +304,7 @@ export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
     const state = get();
     if (enabled === state.liveMode) return;
     set({ liveMode: enabled });
+    if (!enabled) liveKlinePairs.clear();
     // When entering live mode, stop the simulated bot interval
     // (real data will drive the display instead)
     if (enabled && state.engineInterval) {
@@ -356,23 +403,35 @@ export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
     }));
   },
 
-  updateKlineFromBinance: (pair, openTime, open, high, low, close, volume, isClosed) => {
+  setKlineHistory: (pair, history) => {
+    liveKlinePairs.add(pair);
     set((s) => {
-      const ks = s.klines[pair] ? [...s.klines[pair]] : [];
-      if (ks.length === 0) {
-        // No history — just add this candle
-        ks.push({ openTime, open, high, low, close, volume });
-        return { klines: { ...s.klines, [pair]: ks } };
-      }
+      // Keep any live candle that already arrived (newer than the fetched history).
+      const existing = liveKlinePairs.has(pair) ? s.klines[pair] ?? [] : [];
+      const lastHist = history.length ? history[history.length - 1].openTime : -Infinity;
+      const merged = history.concat(existing.filter((k) => k.openTime > lastHist));
+      return { klines: { ...s.klines, [pair]: merged.slice(-MAX_KLINES) } };
+    });
+  },
+
+  updateKlineFromBinance: (pair, openTime, open, high, low, close, volume) => {
+    set((s) => {
+      // The simulated history is made-up data around a static price: the first real candle replaces it.
+      const first = !liveKlinePairs.has(pair);
+      liveKlinePairs.add(pair);
+      const ks = first ? [] : [...(s.klines[pair] ?? [])];
+      const candle = { openTime, open, high, low, close, volume };
       const last = ks[ks.length - 1];
-      // If the candle is for the same time period, update it
-      if (last.openTime === openTime) {
-        ks[ks.length - 1] = { openTime, open, high, low, close, volume };
-      } else if (openTime > last.openTime) {
-        // New candle — add it
-        ks.push({ openTime, open, high, low, close, volume });
-        // Keep max 500 candles
-        if (ks.length > 500) ks.shift();
+      if (!last || openTime > last.openTime) {
+        ks.push(candle);
+        if (ks.length > MAX_KLINES) ks.splice(0, ks.length - MAX_KLINES);
+      } else if (last.openTime === openTime) {
+        ks[ks.length - 1] = candle;
+      } else {
+        // Late / out-of-order update for an older candle: replace it if we have it, else ignore.
+        const idx = ks.findIndex((k) => k.openTime === openTime);
+        if (idx >= 0) ks[idx] = candle;
+        else return s;
       }
       return { klines: { ...s.klines, [pair]: ks } };
     });
@@ -399,8 +458,8 @@ export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
       // MARKET / IOC / FOK — estimate worst-case cost using best ask (BUY) or just check qty (SELL)
       if (isBuy) {
         const snap = state.books[pair];
-        const bestAsk = snap.asks[0]?.price ?? 0;
-        const est = bestAsk * qty;
+        // Worst-case cost: the limit price for IOC/FOK, otherwise walk the visible asks.
+        const est = price !== null ? price * qty : estimateBuyCost(snap?.asks ?? [], qty);
         const bal = state.balances.find((b) => b.asset === quoteAsset);
         if (!bal || bal.free < est) return { ok: false, reason: `Insufficient ${quoteAsset} for market buy` };
       } else {
@@ -411,40 +470,36 @@ export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
 
     const result = eng.placeOrder({ pair, side, type, price, qty, userId: CURRENT_USER_ID });
 
-    // Reserve / settle balances (simplified)
+    // Settle the TAKER side from what actually happened:
+    //  - pay/receive at the real fill prices (price improvement is kept by the user)
+    //  - lock funds only for the part of a LIMIT/POST_ONLY order that rests on the book
+    //  - IOC/FOK/MARKET remainders are cancelled, so they never lock anything
     if (result.order.status !== "REJECTED") {
-      set((s) => {
-        const balances = s.balances.map((b) => {
-          if (b.asset === (isBuy ? quoteAsset : baseAsset)) {
-            const reserved = isBuy ? (price ?? 0) * qty : qty;
-            if (result.order.status === "FILLED") {
-              // settled: subtract, and credit the other side
-              return { ...b, free: round(b.free - reserved, 8) };
+      const filledQty = result.trades.reduce((acc, t) => acc + t.qty, 0);
+      const filledCost = result.trades.reduce((acc, t) => acc + t.qty * t.price, 0);
+      const rests =
+        (type === "LIMIT" || type === "POST_ONLY") &&
+        (result.order.status === "NEW" || result.order.status === "PARTIALLY_FILLED") &&
+        result.order.remainingQty > 0;
+      const restQty = rests ? result.order.remainingQty : 0;
+      const lockQuote = round((price ?? 0) * restQty, 8);
+
+      set((s) => ({
+        balances: s.balances.map((b) => {
+          if (isBuy) {
+            if (b.asset === quoteAsset) {
+              return { ...b, free: round(b.free - filledCost - lockQuote, 8), locked: round(b.locked + lockQuote, 8) };
             }
-            if (result.order.status === "PARTIALLY_FILLED") {
-              const filled = result.order.filledQty;
-              const settled = isBuy ? filled * (price ?? result.order.avgFillPrice ?? 0) : filled;
-              return { ...b, free: round(b.free - settled, 8), locked: round(b.locked + (reserved - settled), 8) };
+            if (b.asset === baseAsset) return { ...b, free: round(b.free + filledQty, 8) };
+          } else {
+            if (b.asset === baseAsset) {
+              return { ...b, free: round(b.free - filledQty - restQty, 8), locked: round(b.locked + restQty, 8) };
             }
-            // resting on book
-            return { ...b, free: round(b.free - reserved, 8), locked: round(b.locked + reserved, 8) };
+            if (b.asset === quoteAsset) return { ...b, free: round(b.free + filledCost, 8) };
           }
           return b;
-        });
-        // Credit counter-asset for filled trades
-        const trades = result.trades;
-        if (trades.length > 0) {
-          const filledQty = trades.reduce((s, t) => s + t.qty, 0);
-          const filledCost = trades.reduce((s, t) => s + t.qty * t.price, 0);
-          balances.forEach((b, i) => {
-            if (b.asset === (isBuy ? baseAsset : quoteAsset)) {
-              const credit = isBuy ? filledQty : filledCost;
-              balances[i] = { ...b, free: round(b.free + credit, 8) };
-            }
-          });
-        }
-        return { balances };
-      });
+        }),
+      }));
     }
 
     // Push events
@@ -459,6 +514,7 @@ export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
     const state = get();
     const order = state.orders.find((o) => o.id === orderId);
     if (!order) return;
+    if (order.status !== "NEW" && order.status !== "PARTIALLY_FILLED") return;
     const eng = state.engines[order.pair];
     if (!eng) return;
     const ok = eng.cancel(orderId);
@@ -533,4 +589,18 @@ export const useOpenCEX = create<MbuniCEXState>((set, get) => ({
 function round(n: number, d: number) {
   const f = Math.pow(10, d);
   return Math.round(n * f) / f;
+}
+
+/** Cost of buying `qty` by walking the visible ask levels (extrapolates at the last level). */
+export function estimateBuyCost(asks: Array<{ price: number; qty: number }>, qty: number): number {
+  let remaining = qty;
+  let cost = 0;
+  for (const lvl of asks) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, lvl.qty);
+    cost += take * lvl.price;
+    remaining -= take;
+  }
+  if (remaining > 0 && asks.length > 0) cost += remaining * asks[asks.length - 1].price;
+  return cost;
 }
